@@ -408,6 +408,20 @@ async function loadAll() {
 
 /* ======================= เรียลไทม์ ======================= */
 let rtTimer;
+// อัปเดตเฉพาะแถวที่เปลี่ยน แทนการโหลดทั้งหมดใหม่ ประหยัด Egress ของ Supabase มาก
+async function applyChange(p) {
+  if (p.eventType === 'DELETE') { S.rows = S.rows.filter(r => r.id !== p.old.id); return; }
+  const n = p.new, i = S.rows.findIndex(r => r.id === n.id);
+  if (i >= 0) S.rows[i] = { ...S.rows[i], ...n };
+  else if (p.eventType === 'INSERT') S.rows.push(n);
+  else { const { data } = await sb.from('requests').select('*').eq('id', n.id).maybeSingle(); if (data) S.rows.push(data); }
+}
+async function resync() { await loadAll(); renderContent(); renderHeaderCounts(); }
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (S.me && hiddenAt && Date.now() - hiddenAt > 5 * 60000) resync();
+});
 function subscribe() {
   sb.channel('rt-requests')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, p => {
@@ -427,9 +441,14 @@ function subscribe() {
         const prev = S.rows.find(r => r.id === n.id);
         if (prev && prev.status !== n.status) notify(pr(n.id) + ' ' + STATUS[n.status], n.title);
       }
-      clearTimeout(rtTimer);
-      rtTimer = setTimeout(async () => { await loadAll(); renderContent(); renderHeaderCounts(); }, 250);
-    }).subscribe();
+      applyChange(p).then(() => {
+        clearTimeout(rtTimer);
+        rtTimer = setTimeout(() => { renderContent(); renderHeaderCounts(); }, 200);
+      });
+    }).subscribe(status => {
+      // ต่อเรียลไทม์ใหม่หลังเน็ตหลุด: โหลดข้อมูลทั้งหมดหนึ่งครั้งเพื่อเก็บตกที่พลาดไป
+      if (status === 'SUBSCRIBED') { if (S.rtReady) resync(); S.rtReady = true; }
+    });
   sb.channel('rt-me')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: 'id=eq.' + S.me.id }, async p => {
       if (!p.new.active) { await sb.auth.signOut(); location.reload(); return; }
