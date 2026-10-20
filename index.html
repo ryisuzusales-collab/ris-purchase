@@ -168,6 +168,7 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .hist .h.edit{border-color:var(--red)}
 .hist small{color:var(--muted)}
 .chg s{color:var(--muted)}
+.soundbar{display:block;width:100%;border:0;background:var(--amber-bg);color:var(--amber);font-weight:600;padding:9px 16px;cursor:pointer;text-align:center}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -219,25 +220,41 @@ function toast(msg, kind = '') {
   setTimeout(() => t.remove(), kind === 'new' ? 9000 : 4000);
 }
 let audioCtx;
-function beep() {
+const soundOn = () => { try { return localStorage.getItem('pr_sound') !== 'off'; } catch { return true; } };
+function ensureAudio() {
   try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.18].forEach(dt => {
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
-      g.gain.setValueAtTime(0.18, audioCtx.currentTime + dt);
-      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dt + 0.15);
-      o.start(audioCtx.currentTime + dt); o.stop(audioCtx.currentTime + dt + 0.16);
-    });
+    if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.onstatechange = updateSoundBar; }
+    if (audioCtx.state !== 'running') audioCtx.resume().then(updateSoundBar).catch(() => {});
+  } catch {}
+  updateSoundBar();
+}
+function beep(force) {
+  if (!force && !soundOn()) return;
+  try {
+    ensureAudio();
+    const t0 = audioCtx.currentTime + 0.03;
+    // เสียงกริ่ง 3 โน้ตไล่ขึ้น เล่น 2 รอบ
+    [0, 0.9].forEach(rep => [[784, 0], [988, 0.15], [1319, 0.3]].forEach(([f, dt]) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = t0 + rep + dt;
+      o.type = 'triangle'; o.frequency.value = f; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      o.start(t); o.stop(t + 0.5);
+    }));
   } catch {}
 }
+function updateSoundBar() {
+  const btn = $('#soundBtn'); if (btn) { btn.textContent = soundOn() ? '🔊' : '🔇'; btn.title = soundOn() ? 'ปิดเสียงแจ้งเตือน' : 'เปิดเสียงแจ้งเตือน'; }
+  const bar = $('#soundbar'); if (bar) bar.classList.toggle('hidden', !(soundOn() && (!audioCtx || audioCtx.state !== 'running')));
+}
+['click', 'touchstart', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (soundOn() && (!audioCtx || audioCtx.state !== 'running')) ensureAudio(); }, { passive: true }));
 function notify(title, body) {
   toast(title + '\n' + body, 'new'); beep();
   if ('Notification' in window && Notification.permission === 'granted') {
     try { new Notification(title, { body, tag: 'pr-' + Date.now() }); } catch {}
   }
 }
-document.addEventListener('click', () => { try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch {} }, { once: true });
 
 /* ======================= สถานะแอป ======================= */
 let sb;
@@ -376,13 +393,15 @@ function renderShell() {
     <div class="who"><b>${esc(S.me.full_name || S.me.username)}</b>${ROLE[S.me.role]}${S.me.branch ? ' / ' + esc(S.me.branch) : ''}</div>
     ${canNotif ? `<button class="iconbtn" data-act="notif" title="เปิดการแจ้งเตือนบนเครื่องนี้">เปิดแจ้งเตือน</button>` : ''}
     ${isStaff() ? `<button class="iconbtn bell" data-act="gonew" title="งานใหม่และงานที่มีการแก้ไข รอรับทราบ">🔔<span class="n hidden" id="bellN"></span></button>` : ''}
+    <button class="iconbtn" id="soundBtn" data-act="sound">🔊</button>
     <button class="iconbtn" data-act="logout">ออก</button>
   </div></header>
+  <button id="soundbar" class="soundbar hidden" data-act="unlock">เสียงแจ้งเตือนยังปิดอยู่ แตะที่นี่เพื่อเปิดเสียง</button>
   <main class="wrap">
     <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.view === k ? 'on' : ''}" data-act="tab" data-v="${k}">${l}${k === 'trash' ? `<span class="c" id="trashN">${trash().length}</span>` : ''}</button>`).join('')}</nav>
     <div id="content"></div>
   </main>`;
-  renderContent(); renderHeaderCounts();
+  renderContent(); renderHeaderCounts(); updateSoundBar();
 }
 
 function renderHeaderCounts() {
@@ -777,6 +796,13 @@ document.addEventListener('keydown', e => {
 /* ======================= ปุ่มทั้งหมด ======================= */
 const now = () => new Date().toISOString();
 const A = {
+  sound: () => {
+    const on = !soundOn();
+    try { localStorage.setItem('pr_sound', on ? 'on' : 'off'); } catch {}
+    updateSoundBar();
+    if (on) { beep(true); toast('เปิดเสียงแจ้งเตือนแล้ว'); } else toast('ปิดเสียงแจ้งเตือนแล้ว');
+  },
+  unlock: () => { ensureAudio(); beep(true); toast('เปิดเสียงแจ้งเตือนแล้ว'); },
   authmode: el => renderAuth(el.dataset.v),
   logout: async () => { await sb.auth.signOut(); location.reload(); },
   notif: async () => { await Notification.requestPermission(); renderShell(); },
