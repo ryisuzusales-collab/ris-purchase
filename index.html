@@ -157,6 +157,17 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .toast.new{border-left:5px solid var(--red)}
 @keyframes tin{from{transform:translateY(10px);opacity:0}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
+.s-edit{background:var(--red-bg);color:var(--red)}
+.ticket.edited{border-color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}
+.alert{background:var(--red-bg);color:var(--red);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+.alert b{display:block;margin-bottom:4px}
+.alert ul,.hist ul{margin:6px 0 0;padding-left:18px}
+.alert .btn{margin-top:10px}
+.hist .h{border-left:3px solid var(--line);padding:4px 0 8px 12px;font-size:14px}
+.hist .h.ack{border-color:var(--green)}
+.hist .h.edit{border-color:var(--red)}
+.hist small{color:var(--muted)}
+.chg s{color:var(--muted)}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -178,8 +189,8 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 <script>
 /* ======================= ตั้งค่า ======================= */
 const CONFIG = {
-  SUPABASE_URL: 'https://fzozxftfxtvbmuryiihf.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_WdCOu73wY1xQuM70rs6NbA_vDNO5_0-',   // Publishable key (ขึ้นต้นด้วย sb_publishable_)
+  SUPABASE_URL: 'https://YOUR-PROJECT.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_xxxxxxxx',   // Publishable key (ขึ้นต้นด้วย sb_publishable_)
   EMAIL_DOMAIN: 'purchase.local',      // ใช้แปลง "ชื่อผู้ใช้" เป็นอีเมลภายใน ไม่มีการส่งเมลจริง
   BUCKET: 'purchase-files',
   BRANCHES: ['สำนักงานใหญ่','สาขา 2','สาขา 3','สาขา 4','สาขา 5','สาขา 6','สาขา 7','สาขา 8','สาขา 9'],
@@ -238,6 +249,12 @@ const S = {
 const isStaff = () => S.me && (S.me.role === 'staff' || S.me.role === 'admin');
 const isAdmin = () => S.me && S.me.role === 'admin';
 const live = () => S.rows.filter(r => !r.deleted_at);
+const needsAttn = r => r.status === 'new' || r.edit_flag;
+const short = (t, n = 120) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + '…' : t; };
+function changeLine(c) {
+  const v = x => c.date ? fmtD(x) : esc(short(x || '(ว่าง)'));
+  return c.from === undefined ? `${esc(c.field)}: ${esc(short(c.to))}` : `${esc(c.field)}: <s>${v(c.from)}</s> เป็น <b>${v(c.to)}</b>`;
+}
 const trash = () => S.rows.filter(r => r.deleted_at);
 
 /* ======================= เริ่มต้น / ล็อกอิน ======================= */
@@ -324,6 +341,14 @@ function subscribe() {
       if (p.eventType === 'INSERT' && isStaff() && n.requester_id !== S.me.id) {
         notify('งานใหม่ ' + pr(n.id), `${n.title}\nจาก ${n.requester_name || '-'}  ต้องการ ${fmtD(n.needed_date)}`);
       }
+      if (p.eventType === 'UPDATE') {
+        const prev = S.rows.find(r => r.id === n.id);
+        const pl = (prev?.edit_log || []).length, nl = (n.edit_log || []).length;
+        const last = (n.edit_log || [])[nl - 1];
+        if (prev && nl > pl && last?.kind === 'edit' && last.by !== S.me.full_name && (isStaff() || n.requester_id === S.me.id)) {
+          notify('มีการแก้ไข ' + pr(n.id), `${n.title}\nแก้โดย ${last.by}: ${(last.changes || []).map(c => c.field).join(', ')}`);
+        }
+      }
       if (p.eventType === 'UPDATE' && n.requester_id === S.me.id && !isStaff()) {
         const prev = S.rows.find(r => r.id === n.id);
         if (prev && prev.status !== n.status) notify(pr(n.id) + ' ' + STATUS[n.status], n.title);
@@ -350,7 +375,7 @@ function renderShell() {
     <div class="brand">ระบบจัดซื้อ<small>สั่งซื้อ สั่งซ่อม สั่งงาน</small></div>
     <div class="who"><b>${esc(S.me.full_name || S.me.username)}</b>${ROLE[S.me.role]}${S.me.branch ? ' / ' + esc(S.me.branch) : ''}</div>
     ${canNotif ? `<button class="iconbtn" data-act="notif" title="เปิดการแจ้งเตือนบนเครื่องนี้">เปิดแจ้งเตือน</button>` : ''}
-    ${isStaff() ? `<button class="iconbtn bell" data-act="gonew" title="งานใหม่ที่ยังไม่รับทราบ">🔔<span class="n hidden" id="bellN"></span></button>` : ''}
+    ${isStaff() ? `<button class="iconbtn bell" data-act="gonew" title="งานใหม่และงานที่มีการแก้ไข รอรับทราบ">🔔<span class="n hidden" id="bellN"></span></button>` : ''}
     <button class="iconbtn" data-act="logout">ออก</button>
   </div></header>
   <main class="wrap">
@@ -361,7 +386,7 @@ function renderShell() {
 }
 
 function renderHeaderCounts() {
-  const n = live().filter(r => r.status === 'new').length;
+  const n = live().filter(needsAttn).length;
   const b = $('#bellN'); if (b) { b.textContent = n; b.classList.toggle('hidden', !n); }
   const t = $('#trashN'); if (t) t.textContent = trash().length;
   document.title = (isStaff() && n ? `(${n}) ` : '') + 'ระบบจัดซื้อ';
@@ -373,6 +398,7 @@ function filtered(base) {
     if (S.view !== 'trash') {
       if (S.filter === 'open' && r.status === 'done') return false;
       if (['new', 'pending', 'done'].includes(S.filter) && r.status !== S.filter) return false;
+      if (S.filter === 'attn' && !needsAttn(r)) return false;
     }
     if (S.type && r.req_type !== S.type) return false;
     if (q) {
@@ -392,9 +418,10 @@ function sortUrgent(list) {
 }
 
 function toolbar(withStatus) {
-  const counts = { open: 0, new: 0, pending: 0, done: 0, all: 0 };
-  live().forEach(r => { counts.all++; counts[r.status]++; if (r.status !== 'done') counts.open++; });
+  const counts = { open: 0, new: 0, pending: 0, done: 0, all: 0, attn: 0 };
+  live().forEach(r => { counts.all++; counts[r.status]++; if (r.status !== 'done') counts.open++; if (needsAttn(r)) counts.attn++; });
   const chips = [['open', 'ยังไม่เสร็จ'], ['new', 'งานใหม่'], ['pending', 'รอดำเนินการ'], ['done', 'เรียบร้อย'], ['all', 'ทั้งหมด']];
+  if (isStaff()) chips.unshift(['attn', 'ต้องรับทราบ']);
   return `<div class="bar">
     ${withStatus ? `<div class="chips">${chips.map(([k, l]) => `<button class="chip ${S.filter === k ? 'on' : ''}" data-act="filter" data-v="${k}">${l} ${counts[k]}</button>`).join('')}</div>` : ''}
     <input class="search" id="q" placeholder="ค้นหาเลขที่ เรื่อง ผู้สั่ง ร้าน" value="${esc(S.q)}">
@@ -430,12 +457,13 @@ function dueBlock(r) {
 function ticket(r) {
   const [cls, big, small] = dueBlock(r);
   const vend = (r.vendors || []).filter(v => v.name);
-  return `<div class="ticket ${cls}" role="button" tabindex="0" data-act="open" data-id="${r.id}">
+  return `<div class="ticket ${cls} ${r.edit_flag ? 'edited' : ''}" role="button" tabindex="0" data-act="open" data-id="${r.id}">
     <div class="due"><b>${big}</b><span>${small}</span></div>
     <div class="tb">
       <div class="r1"><span class="prno">${pr(r.id)}</span><span class="type">${esc(r.req_type)}</span>
         ${r.status === 'new' ? '<span class="new-dot" title="ยังไม่มีเจ้าหน้าที่รับทราบ"></span>' : ''}
-        <span class="badge s-${r.status}">${STATUS[r.status]}</span></div>
+        ${r.edit_flag ? '<span class="badge s-edit">มีการแก้ไข</span>' : ''}
+        <span class="badge s-${r.status}" ${r.edit_flag ? 'style="margin-left:0"' : ''}>${STATUS[r.status]}</span></div>
       <div class="ttl">${esc(r.title)}</div>
       <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b>${r.branch ? ' (' + esc(r.branch) + ')' : ''}</span>
         <span>แนบเมื่อ <b>${fmtDT(r.created_at)}</b></span>
@@ -636,11 +664,22 @@ function openDetail(id, keepVendors) {
       + (r.staff_note ? `<div class="box" style="margin-top:8px">${esc(r.staff_note)}</div>` : '');
   }
 
+  const log = r.edit_log || [];
+  const lastEdit = [...log].reverse().find(e => e.kind === 'edit');
+  const alertHtml = r.edit_flag && !r.deleted_at ? `<div class="alert"><b>คำขอนี้ถูกแก้ไขหลังจากรับทราบแล้ว</b>
+      แก้โดย ${esc(lastEdit?.by)} เมื่อ ${fmtDT(lastEdit?.at)} ตรวจรายการที่เปลี่ยนก่อนดำเนินการต่อ
+      <ul>${(lastEdit?.changes || []).map(c => `<li class="chg">${changeLine(c)}</li>`).join('')}</ul>
+      ${staffCan ? `<button class="btn primary" data-act="ackEdit" data-id="${r.id}">รับทราบการแก้ไข</button>` : '<div class="note" style="margin-top:6px">รอเจ้าหน้าที่จัดซื้อรับทราบการแก้ไข</div>'}</div>` : '';
+  const histHtml = log.length ? `<div class="sec hist"><h4>ประวัติการแก้ไข (${log.filter(e => e.kind === 'edit').length} ครั้ง)</h4>
+      ${[...log].reverse().map(e => e.kind === 'ack'
+        ? `<div class="h ack">รับทราบการแก้ไขโดย <b>${esc(e.by)}</b> <small>${fmtDT(e.at)}</small></div>`
+        : `<div class="h edit">แก้ไขโดย <b>${esc(e.by)}</b> <small>${fmtDT(e.at)}</small><ul>${(e.changes || []).map(c => `<li class="chg">${changeLine(c)}</li>`).join('')}</ul></div>`).join('')}</div>` : '';
+
   const actions = [];
   const left = [];
   if (!r.deleted_at) {
     if (staffCan && r.status === 'new') actions.push(`<button class="btn primary" data-act="ack" data-id="${r.id}">ยืนยันรับทราบ</button>`);
-    if (staffCan && r.status === 'pending') actions.push(`<button class="btn ok" data-act="done" data-id="${r.id}">เปลี่ยนเป็นเรียบร้อย</button>`);
+    if (staffCan && r.status === 'pending') actions.push(`<button class="btn ok" data-act="done" data-id="${r.id}" ${r.edit_flag ? 'disabled title="รับทราบการแก้ไขก่อน"' : ''}>เปลี่ยนเป็นเรียบร้อย</button>`);
     if (isAdmin() && r.status === 'done') actions.push(`<button class="btn" data-act="reopen" data-id="${r.id}">ย้อนกลับเป็นรอดำเนินการ</button>`);
     if (isAdmin() && !S.adminEdit) left.push(`<button class="btn sm" data-act="adminEdit">แก้ไขข้อมูลคำขอ</button>`);
     if (isAdmin()) left.push(`<label class="btn sm" style="cursor:pointer">+ แนบไฟล์เพิ่ม<input type="file" multiple id="addFiles" class="hidden"></label>`);
@@ -653,9 +692,11 @@ function openDetail(id, keepVendors) {
   openModal(`
   <div class="sh-h"><div><span class="prno">${pr(r.id)}</span><h2>${esc(r.title)}</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
   <div class="sh-b">
+    ${alertHtml}
     ${info}
     <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${files}</div>
     <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
+    ${histHtml}
     ${!isStaff() ? `<p class="note" style="margin-top:16px">คุณดูได้อย่างเดียว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการแก้ไข</p>` : ''}
     <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
   </div>`);
@@ -709,13 +750,16 @@ function exportExcel() {
       'หมายเหตุเจ้าหน้าที่': r.staff_note || '',
       'รับทราบโดย': r.acknowledged_by || '', 'เวลารับทราบ': bk(r.acknowledged_at),
       'เรียบร้อยโดย': r.completed_by || '', 'เวลาเรียบร้อย': bk(r.completed_at),
+      'แก้ไขแล้ว (ครั้ง)': (r.edit_log || []).filter(e => e.kind === 'edit').length,
+      'การแก้ไขรอรับทราบ': r.edit_flag ? 'ใช่' : '',
+      'ประวัติการแก้ไข': (r.edit_log || []).map(e => e.kind === 'ack' ? `${bk(e.at)} รับทราบโดย ${e.by}` : `${bk(e.at)} แก้โดย ${e.by}: ${(e.changes || []).map(c => c.from === undefined ? `${c.field} ${c.to}` : `${c.field} จาก "${c.from ?? ''}" เป็น "${c.to ?? ''}"`).join('; ')}`).join('\n'),
       'จำนวนไฟล์': (r.files || []).length, 'ชื่อไฟล์': (r.files || []).map(f => f.name).join(', '),
     };
     if (inTrash) { o['ลบเมื่อ'] = bk(r.deleted_at); o['ลบโดย'] = r.deleted_by || ''; }
     return o;
   });
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['เรื่อง', 'รายละเอียด', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์'].includes(k) ? 36 : 18 }));
+  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['เรื่อง', 'รายละเอียด', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์', 'ประวัติการแก้ไข'].includes(k) ? 36 : 18 }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, inTrash ? 'ถังขยะ' : 'รายการจัดซื้อ');
   XLSX.writeFile(wb, `${inTrash ? 'ถังขยะจัดซื้อ' : 'รายการจัดซื้อ'}_${todayYMD()}.xlsx`);
@@ -736,7 +780,7 @@ const A = {
   authmode: el => renderAuth(el.dataset.v),
   logout: async () => { await sb.auth.signOut(); location.reload(); },
   notif: async () => { await Notification.requestPermission(); renderShell(); },
-  gonew: () => { S.view = 'list'; S.filter = 'new'; renderShell(); },
+  gonew: () => { S.view = 'list'; S.filter = 'attn'; renderShell(); },
   tab: el => { S.view = el.dataset.v; renderShell(); },
   filter: el => { S.filter = el.dataset.v; renderContent(); },
   create: () => openCreate(),
@@ -754,6 +798,7 @@ const A = {
     if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
   },
   ack: async (el, id) => { if (await patch(id, { status: 'pending', acknowledged_by: S.me.full_name, acknowledged_at: now() }, 'รับทราบแล้ว สถานะเป็นรอดำเนินการ')) openDetail(id); },
+  ackEdit: async (el, id) => { if (await patch(id, { edit_flag: false }, 'รับทราบการแก้ไขแล้ว')) openDetail(id); },
   addVendor: () => { readVendorInputs(); S.editVendors.push({ name: '', contact: '', item: '', done: false }); openDetail(S.modalId, true); setTimeout(() => { const l = document.querySelectorAll('#vrows [data-vf=name]'); l[l.length - 1]?.focus(); }, 0); },
   delVendor: el => { readVendorInputs(); S.editVendors.splice(+el.dataset.i, 1); openDetail(S.modalId, true); },
   saveVendors: async (el, id) => {
@@ -764,6 +809,7 @@ const A = {
   done: async (el, id) => {
     readVendorInputs();
     const r = S.rows.find(x => x.id === id);
+    if (r.edit_flag) return toast('มีการแก้ไขที่ยังไม่ได้รับทราบ กดรับทราบการแก้ไขก่อน', 'err');
     const changed = JSON.stringify(S.editVendors.filter(v => v.name)) !== JSON.stringify(r.vendors || []);
     if (!confirm(`ยืนยันเปลี่ยน ${pr(id)} เป็น "เรียบร้อย"?`)) return;
     const fields = { status: 'done', completed_by: S.me.full_name, completed_at: now() };
