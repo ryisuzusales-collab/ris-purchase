@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ระบบจัดซื้อ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --paper:#EEF1F5; --surface:#FFFFFF; --ink:#1F2A44; --ink-2:#3A4766; --muted:#66718A; --line:#D9DFE8;
+  --red:#C8102E; --red-bg:#FBE9EC; --amber:#A86A00; --amber-bg:#FFF3D9; --green:#2E7D5B; --green-bg:#E3F3EA;
+  --blue:#2B5FAA; --blue-bg:#E6EEFA; --due-ok:#DCE3EE;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#11161F; --surface:#1A2130; --ink:#E7ECF4; --ink-2:#C3CCDB; --muted:#8C97AD; --line:#2C3547;
+    --red:#FF5C6F; --red-bg:#3A1A21; --amber:#F2B544; --amber-bg:#36290F; --green:#5CC79A; --green-bg:#16332A;
+    --blue:#7FA8EA; --blue-bg:#1B2A45; --due-ok:#263044;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 "IBM Plex Sans Thai","Sarabun","Noto Sans Thai",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.hidden{display:none!important}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+
+/* top bar */
+.top{background:var(--ink);color:var(--paper);position:sticky;top:env(safe-area-inset-top,0px);z-index:20}
+@media (prefers-color-scheme:dark){.top{background:#0B0F16;color:var(--ink)}}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:21;background:var(--ink)}
+.top .wrap{display:flex;align-items:center;gap:12px;height:58px}
+.brand{font-weight:700;font-size:17px;letter-spacing:.2px;margin-right:auto;white-space:nowrap}
+.brand small{display:block;font-weight:400;font-size:12px;opacity:.7;margin-top:-3px}
+.who{font-size:13px;text-align:right;line-height:1.3}
+.who b{display:block;font-weight:600}
+.iconbtn{background:transparent;border:1px solid rgba(255,255,255,.25);color:inherit;border-radius:8px;height:36px;min-width:36px;padding:0 10px;cursor:pointer;position:relative}
+.bell .n{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;border-radius:10px;font-size:11px;padding:0 6px;line-height:18px;font-weight:700}
+
+/* tabs */
+.tabs{display:flex;gap:4px;padding:14px 0 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{background:none;border:0;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent;white-space:nowrap}
+.tab.on{color:var(--ink);border-bottom-color:var(--red)}
+.tab .c{font-size:12px;background:var(--line);border-radius:9px;padding:0 7px;margin-left:4px;color:var(--ink-2)}
+
+/* toolbar */
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:14px 0}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:20px;padding:5px 12px;font-size:13px;cursor:pointer}
+.chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.search{flex:1;min-width:180px;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 12px}
+.sel{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 10px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--red);border-color:var(--red);color:#fff}
+.btn.dark{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.btn.ok{background:var(--green);border-color:var(--green);color:#fff}
+.btn.danger{color:var(--red);border-color:var(--red)}
+.btn.sm{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* tickets */
+.list{display:flex;flex-direction:column;gap:10px;padding-bottom:40px}
+.ticket{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;text-align:left}
+.ticket:hover{border-color:var(--muted)}
+.due{flex:0 0 84px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px;background:var(--due-ok);color:var(--ink);text-align:center}
+.due b{font-size:30px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums}
+.due span{font-size:12px;margin-top:4px}
+.u-over .due{background:var(--red);color:#fff}
+.u-today .due{background:var(--red-bg);color:var(--red)}
+.u-soon .due{background:var(--amber-bg);color:var(--amber)}
+.u-done .due{background:var(--green-bg);color:var(--green)}
+.u-done{opacity:.82}
+.tb{flex:1;min-width:0;padding:10px 14px}
+.r1{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
+.prno{font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.type{color:var(--muted)}
+.badge{margin-left:auto;font-size:12px;font-weight:600;border-radius:6px;padding:2px 9px}
+.s-new{background:var(--blue-bg);color:var(--blue)}
+.s-pending{background:var(--amber-bg);color:var(--amber)}
+.s-done{background:var(--green-bg);color:var(--green)}
+.s-trash{background:var(--line);color:var(--ink-2)}
+.ttl{font-weight:600;font-size:16px;margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 16px}
+.meta b{color:var(--ink-2);font-weight:500}
+.vend{font-size:13px;margin-top:4px;color:var(--ink-2)}
+.empty{padding:48px 16px;text-align:center;color:var(--muted);background:var(--surface);border:1px dashed var(--line);border-radius:10px}
+.new-dot{width:8px;height:8px;border-radius:50%;background:var(--blue);display:inline-block}
+
+/* calendar */
+.calhead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.calhead h3{margin:0 auto 0 0;font-size:18px}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:40px}
+.dow{background:var(--surface);text-align:center;font-size:12px;color:var(--muted);padding:6px 0;font-weight:600}
+.cell{background:var(--surface);min-height:104px;padding:4px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.cell.empty{background:var(--paper)}
+.cell .d{font-size:12px;color:var(--muted);font-weight:600;padding:0 2px}
+.cell.today .d{color:#fff;background:var(--red);border-radius:10px;align-self:flex-start;padding:0 7px}
+.cev{font-size:11.5px;border-radius:4px;padding:2px 5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid}
+.cev.s-new{border-color:var(--blue)} .cev.s-pending{border-color:var(--amber)} .cev.s-done{border-color:var(--green)}
+.cev.over{background:var(--red);color:#fff;border-color:var(--red)}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px}
+.tbl th,.tbl td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.tbl th{font-size:12px;color:var(--muted);font-weight:600;background:var(--paper)}
+.scroll{overflow-x:auto;margin-bottom:40px}
+
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(10,15,25,.55);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top,0px)) 12px 24px;overflow-y:auto}
+.sheet{background:var(--surface);border-radius:12px;width:100%;max-width:680px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.sh-h{display:flex;gap:12px;align-items:flex-start;padding:18px 20px 12px;border-bottom:1px solid var(--line)}
+.sh-h h2{margin:2px 0 0;font-size:20px;line-height:1.35}
+.x{margin-left:auto;background:none;border:0;font-size:20px;cursor:pointer;color:var(--muted);padding:0 4px}
+.sh-b{padding:16px 20px 20px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;margin:12px 0}
+.grid2 div span{display:block;font-size:12px;color:var(--muted)}
+.sec{margin-top:18px}
+.sec h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}
+.box{background:var(--paper);border-radius:8px;padding:10px 12px;white-space:pre-wrap}
+.file{display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px}
+.file .fn{flex:1;min-width:0}
+.file .fn b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file .fn small{color:var(--muted)}
+.vrow{display:grid;grid-template-columns:1.2fr 1fr 1.2fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
+.inp{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 10px}
+textarea.inp{min-height:80px;resize:vertical}
+label.f{display:block;margin-bottom:12px}
+label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.clock{background:var(--blue-bg);color:var(--blue);border-radius:8px;padding:10px 12px;font-weight:600;margin-bottom:14px;font-variant-numeric:tabular-nums}
+.foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}
+.foot .left{margin-right:auto;display:flex;gap:8px;flex-wrap:wrap}
+.note{font-size:13px;color:var(--muted)}
+.vlist .vi{display:flex;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px}
+.vlist .vi.ok{border-color:var(--green)}
+.callout{background:var(--blue-bg);color:var(--blue);padding:10px 12px;border-radius:8px;font-size:14px}
+
+/* auth */
+.auth{max-width:400px;margin:8vh auto;padding:0 16px}
+.auth .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px}
+.auth h1{font-size:24px;margin:0 0 4px}
+.auth p{margin:0 0 18px;color:var(--muted)}
+.err{color:var(--red);font-size:14px;margin:6px 0 0;min-height:20px}
+
+/* toast */
+#toasts{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:80;display:flex;flex-direction:column;gap:8px;max-width:340px}
+.toast{background:var(--ink);color:var(--paper);padding:12px 14px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:14px;animation:tin .25s ease-out}
+.toast.err{background:var(--red);color:#fff}
+.toast.new{border-left:5px solid var(--red)}
+@keyframes tin{from{transform:translateY(10px);opacity:0}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}}
+.linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
+
+@media (max-width:640px){
+  .who{display:none}
+  .due{flex-basis:68px} .due b{font-size:24px}
+  .grid2{grid-template-columns:1fr}
+  .vrow{grid-template-columns:1fr 1fr;border:1px solid var(--line);padding:8px;border-radius:8px}
+  .cell{min-height:70px}
+  .cev{font-size:10px;padding:1px 3px}
+  .cev .t{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+/* ======================= ตั้งค่า ======================= */
+const CONFIG = {
+  SUPABASE_URL: 'https://YOUR-PROJECT.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_xxxxxxxx',   // Publishable key (ขึ้นต้นด้วย sb_publishable_)
+  EMAIL_DOMAIN: 'purchase.local',      // ใช้แปลง "ชื่อผู้ใช้" เป็นอีเมลภายใน ไม่มีการส่งเมลจริง
+  BUCKET: 'purchase-files',
+  BRANCHES: ['สำนักงานใหญ่','สาขา 2','สาขา 3','สาขา 4','สาขา 5','สาขา 6','สาขา 7','สาขา 8','สาขา 9'],
+  REQ_TYPES: ['สั่งซื้อ','สั่งซ่อม','สั่งงาน / บริการ','อื่นๆ'],
+  MAX_FILE_MB: 50,
+};
+
+/* ======================= ตัวช่วย ======================= */
+const TZ = 'Asia/Bangkok';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pr = id => 'PR-' + String(id).padStart(5, '0');
+const todayYMD = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+const ymdUTC = ymd => { const [y, m, d] = ymd.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+const daysUntil = ymd => Math.round((ymdUTC(ymd) - ymdUTC(todayYMD())) / 86400000);
+const fmtDT = iso => iso ? new Date(iso).toLocaleString('th-TH', { timeZone: TZ, day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' น.' : '-';
+const fmtD = ymd => { if (!ymd) return '-'; const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }); };
+const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+const STATUS = { new: 'งานใหม่', pending: 'รอดำเนินการ', done: 'เรียบร้อย' };
+const ROLE = { requester: 'ผู้สั่ง', staff: 'เจ้าหน้าที่จัดซื้อ', admin: 'แอดมินหลัก' };
+
+function toast(msg, kind = '') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind; t.textContent = msg;
+  $('#toasts').appendChild(t);
+  setTimeout(() => t.remove(), kind === 'new' ? 9000 : 4000);
+}
+let audioCtx;
+function beep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.18].forEach(dt => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.18, audioCtx.currentTime + dt);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dt + 0.15);
+      o.start(audioCtx.currentTime + dt); o.stop(audioCtx.currentTime + dt + 0.16);
+    });
+  } catch {}
+}
+function notify(title, body) {
+  toast(title + '\n' + body, 'new'); beep();
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification(title, { body, tag: 'pr-' + Date.now() }); } catch {}
+  }
+}
+document.addEventListener('click', () => { try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch {} }, { once: true });
+
+/* ======================= สถานะแอป ======================= */
+let sb;
+const S = {
+  user: null, me: null, rows: [], profiles: [],
+  view: 'list', filter: 'open', q: '', type: '', calMonth: null,
+  pendingFiles: [], modalId: null, editVendors: null, adminEdit: false,
+};
+const isStaff = () => S.me && (S.me.role === 'staff' || S.me.role === 'admin');
+const isAdmin = () => S.me && S.me.role === 'admin';
+const live = () => S.rows.filter(r => !r.deleted_at);
+const trash = () => S.rows.filter(r => r.deleted_at);
+
+/* ======================= เริ่มต้น / ล็อกอิน ======================= */
+async function init() {
+  if (/Line\//i.test(navigator.userAgent)) {
+    const u = new URL(location.href); u.searchParams.set('openExternalBrowser', '1');
+    document.body.insertAdjacentHTML('afterbegin', `<div class="linebar">เปิดผ่าน LINE อยู่ การแจ้งเตือนอาจไม่ทำงาน <a href="${esc(u)}">เปิดในเบราว์เซอร์</a></div>`);
+  }
+  if (CONFIG.SUPABASE_URL.includes('YOUR-PROJECT')) {
+    $('#app').innerHTML = `<div class="auth"><div class="card"><h1>ยังไม่ได้เชื่อมฐานข้อมูล</h1><p>เปิดไฟล์นี้แล้วใส่ SUPABASE_URL และ SUPABASE_ANON_KEY ในส่วน CONFIG ด้านบนของสคริปต์</p></div></div>`;
+    return;
+  }
+  sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+  const { data } = await sb.auth.getSession();
+  if (data.session) { S.user = data.session.user; await enter(); } else renderAuth('login');
+}
+
+function renderAuth(mode) {
+  const br = CONFIG.BRANCHES.map(b => `<option>${esc(b)}</option>`).join('');
+  $('#app').innerHTML = `
+  <div class="auth"><div class="card">
+    <h1>ระบบจัดซื้อ</h1>
+    <p>${mode === 'login' ? 'เข้าสู่ระบบเพื่อส่งคำขอหรือดูสถานะงาน' : 'สมัครบัญชีใหม่ (บัญชีใหม่จะเป็นผู้สั่ง แอดมินเปลี่ยนสิทธิ์ให้ภายหลัง)'}</p>
+    <form id="authf">
+      <label class="f"><span>ชื่อผู้ใช้ (เช่น รหัสพนักงาน)</span><input class="inp" name="u" required autocomplete="username" pattern="[A-Za-z0-9._\\-]{3,}" title="ภาษาอังกฤษหรือตัวเลข อย่างน้อย 3 ตัว"></label>
+      ${mode === 'register' ? `
+      <label class="f"><span>ชื่อ-นามสกุล</span><input class="inp" name="n" required></label>
+      <label class="f"><span>สาขา</span><select class="inp" name="b">${br}</select></label>` : ''}
+      <label class="f"><span>รหัสผ่าน</span><input class="inp" type="password" name="p" required minlength="6" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}"></label>
+      <button class="btn primary" style="width:100%">${mode === 'login' ? 'เข้าสู่ระบบ' : 'สมัครบัญชี'}</button>
+      <div class="err" id="autherr"></div>
+    </form>
+    <p style="margin:12px 0 0;text-align:center"><a href="#" data-act="authmode" data-v="${mode === 'login' ? 'register' : 'login'}">${mode === 'login' ? 'ยังไม่มีบัญชี? สมัครที่นี่' : 'มีบัญชีแล้ว? เข้าสู่ระบบ'}</a></p>
+  </div></div>`;
+  $('#authf').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, btn = f.querySelector('button'), err = $('#autherr');
+    const username = f.u.value.trim().toLowerCase(), email = username + '@' + CONFIG.EMAIL_DOMAIN;
+    btn.disabled = true; err.textContent = '';
+    try {
+      if (mode === 'login') {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password: f.p.value });
+        if (error) throw new Error('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+        S.user = data.user;
+      } else {
+        const { data, error } = await sb.auth.signUp({ email, password: f.p.value, options: { data: { username, full_name: f.n.value.trim(), branch: f.b.value } } });
+        if (error) throw new Error(/registered/i.test(error.message) ? 'ชื่อผู้ใช้นี้ถูกใช้แล้ว' : error.message);
+        if (!data.session) throw new Error('สมัครสำเร็จ แต่ระบบยังเปิดยืนยันอีเมลอยู่ ให้แอดมินปิด Confirm email ใน Supabase');
+        S.user = data.user;
+      }
+      await enter();
+    } catch (x) { err.textContent = x.message; btn.disabled = false; }
+  };
+}
+
+async function enter() {
+  const { data, error } = await sb.from('profiles').select('*').eq('id', S.user.id).single();
+  if (error || !data) { toast('ไม่พบข้อมูลผู้ใช้', 'err'); await sb.auth.signOut(); return renderAuth('login'); }
+  if (!data.active) { toast('บัญชีนี้ถูกระงับ ติดต่อแอดมิน', 'err'); await sb.auth.signOut(); return renderAuth('login'); }
+  S.me = data;
+  S.calMonth = new Date(); S.calMonth.setDate(1);
+  if (isStaff()) { try { await sb.rpc('auto_trash_done'); } catch {} }
+  await loadAll();
+  renderShell();
+  subscribe();
+}
+
+async function loadAll() {
+  const { data, error } = await sb.from('requests').select('*').order('needed_date').limit(5000);
+  if (error) { toast('โหลดข้อมูลไม่สำเร็จ: ' + error.message, 'err'); return; }
+  S.rows = data;
+  if (isAdmin()) {
+    const p = await sb.from('profiles').select('*').order('created_at');
+    S.profiles = p.data || [];
+  }
+}
+
+/* ======================= เรียลไทม์ ======================= */
+let rtTimer;
+function subscribe() {
+  sb.channel('rt-requests')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, p => {
+      const n = p.new || {}, o = p.old || {};
+      if (p.eventType === 'INSERT' && isStaff() && n.requester_id !== S.me.id) {
+        notify('งานใหม่ ' + pr(n.id), `${n.title}\nจาก ${n.requester_name || '-'}  ต้องการ ${fmtD(n.needed_date)}`);
+      }
+      if (p.eventType === 'UPDATE' && n.requester_id === S.me.id && !isStaff()) {
+        const prev = S.rows.find(r => r.id === n.id);
+        if (prev && prev.status !== n.status) notify(pr(n.id) + ' ' + STATUS[n.status], n.title);
+      }
+      clearTimeout(rtTimer);
+      rtTimer = setTimeout(async () => { await loadAll(); renderContent(); renderHeaderCounts(); }, 250);
+    }).subscribe();
+  sb.channel('rt-me')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: 'id=eq.' + S.me.id }, async p => {
+      if (!p.new.active) { await sb.auth.signOut(); location.reload(); return; }
+      if (p.new.role !== S.me.role) { toast('สิทธิ์ของคุณเปลี่ยนเป็น ' + ROLE[p.new.role]); S.me = p.new; await loadAll(); renderShell(); }
+    }).subscribe();
+}
+
+/* ======================= โครงหน้า ======================= */
+function renderShell() {
+  const tabs = [['list', 'รายการ'], ['cal', 'ปฏิทิน']];
+  if (isStaff()) tabs.push(['trash', 'ถังขยะ']);
+  if (isAdmin()) tabs.push(['users', 'ผู้ใช้และสิทธิ์']);
+  if (!tabs.some(t => t[0] === S.view)) S.view = 'list';
+  const canNotif = 'Notification' in window && Notification.permission === 'default' && isStaff();
+  $('#app').innerHTML = `
+  <header class="top"><div class="wrap">
+    <div class="brand">ระบบจัดซื้อ<small>สั่งซื้อ สั่งซ่อม สั่งงาน</small></div>
+    <div class="who"><b>${esc(S.me.full_name || S.me.username)}</b>${ROLE[S.me.role]}${S.me.branch ? ' / ' + esc(S.me.branch) : ''}</div>
+    ${canNotif ? `<button class="iconbtn" data-act="notif" title="เปิดการแจ้งเตือนบนเครื่องนี้">เปิดแจ้งเตือน</button>` : ''}
+    ${isStaff() ? `<button class="iconbtn bell" data-act="gonew" title="งานใหม่ที่ยังไม่รับทราบ">🔔<span class="n hidden" id="bellN"></span></button>` : ''}
+    <button class="iconbtn" data-act="logout">ออก</button>
+  </div></header>
+  <main class="wrap">
+    <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.view === k ? 'on' : ''}" data-act="tab" data-v="${k}">${l}${k === 'trash' ? `<span class="c" id="trashN">${trash().length}</span>` : ''}</button>`).join('')}</nav>
+    <div id="content"></div>
+  </main>`;
+  renderContent(); renderHeaderCounts();
+}
+
+function renderHeaderCounts() {
+  const n = live().filter(r => r.status === 'new').length;
+  const b = $('#bellN'); if (b) { b.textContent = n; b.classList.toggle('hidden', !n); }
+  const t = $('#trashN'); if (t) t.textContent = trash().length;
+  document.title = (isStaff() && n ? `(${n}) ` : '') + 'ระบบจัดซื้อ';
+}
+
+function filtered(base) {
+  const q = S.q.trim().toLowerCase();
+  return base.filter(r => {
+    if (S.view !== 'trash') {
+      if (S.filter === 'open' && r.status === 'done') return false;
+      if (['new', 'pending', 'done'].includes(S.filter) && r.status !== S.filter) return false;
+    }
+    if (S.type && r.req_type !== S.type) return false;
+    if (q) {
+      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, r.req_type, ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+function sortUrgent(list) {
+  return list.sort((a, b) => {
+    const da = a.status === 'done' ? 1 : 0, db = b.status === 'done' ? 1 : 0;
+    if (da !== db) return da - db;
+    if (da) return (b.completed_at || '').localeCompare(a.completed_at || '');
+    return a.needed_date.localeCompare(b.needed_date) || a.created_at.localeCompare(b.created_at);
+  });
+}
+
+function toolbar(withStatus) {
+  const counts = { open: 0, new: 0, pending: 0, done: 0, all: 0 };
+  live().forEach(r => { counts.all++; counts[r.status]++; if (r.status !== 'done') counts.open++; });
+  const chips = [['open', 'ยังไม่เสร็จ'], ['new', 'งานใหม่'], ['pending', 'รอดำเนินการ'], ['done', 'เรียบร้อย'], ['all', 'ทั้งหมด']];
+  return `<div class="bar">
+    ${withStatus ? `<div class="chips">${chips.map(([k, l]) => `<button class="chip ${S.filter === k ? 'on' : ''}" data-act="filter" data-v="${k}">${l} ${counts[k]}</button>`).join('')}</div>` : ''}
+    <input class="search" id="q" placeholder="ค้นหาเลขที่ เรื่อง ผู้สั่ง ร้าน" value="${esc(S.q)}">
+    <select class="sel" id="typeSel"><option value="">ทุกประเภท</option>${CONFIG.REQ_TYPES.map(t => `<option ${S.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+    <button class="btn" data-act="export">ส่งออก Excel</button>
+    ${S.view !== 'trash' ? `<button class="btn primary" data-act="create">+ สร้างคำขอ</button>` : ''}
+  </div>`;
+}
+
+function renderContent() {
+  const c = $('#content'); if (!c) return;
+  const focusQ = document.activeElement && document.activeElement.id === 'q';
+  if (S.view === 'list') c.innerHTML = toolbar(true) + `<div id="listArea"></div>`, renderList();
+  else if (S.view === 'cal') c.innerHTML = toolbar(true) + renderCal();
+  else if (S.view === 'trash') c.innerHTML = toolbar(false) + renderTrash();
+  else if (S.view === 'users') c.innerHTML = renderUsers();
+  const q = $('#q');
+  if (q) {
+    q.oninput = () => { S.q = q.value; if (S.view === 'list') renderList(); else { renderContent(); } };
+    if (focusQ) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  }
+  const ts = $('#typeSel'); if (ts) ts.onchange = () => { S.type = ts.value; renderContent(); };
+}
+
+/* ======================= มุมมองรายการ ======================= */
+function dueBlock(r) {
+  if (r.status === 'done') return ['u-done', '✓', 'เรียบร้อย'];
+  const d = daysUntil(r.needed_date);
+  if (d < 0) return ['u-over', -d, 'วัน เลยกำหนด'];
+  if (d === 0) return ['u-today', 'วันนี้', 'ต้องใช้'];
+  return [d <= 3 ? 'u-soon' : 'u-ok', d, 'วัน'];
+}
+function ticket(r) {
+  const [cls, big, small] = dueBlock(r);
+  const vend = (r.vendors || []).filter(v => v.name);
+  return `<div class="ticket ${cls}" role="button" tabindex="0" data-act="open" data-id="${r.id}">
+    <div class="due"><b>${big}</b><span>${small}</span></div>
+    <div class="tb">
+      <div class="r1"><span class="prno">${pr(r.id)}</span><span class="type">${esc(r.req_type)}</span>
+        ${r.status === 'new' ? '<span class="new-dot" title="ยังไม่มีเจ้าหน้าที่รับทราบ"></span>' : ''}
+        <span class="badge s-${r.status}">${STATUS[r.status]}</span></div>
+      <div class="ttl">${esc(r.title)}</div>
+      <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b>${r.branch ? ' (' + esc(r.branch) + ')' : ''}</span>
+        <span>แนบเมื่อ <b>${fmtDT(r.created_at)}</b></span>
+        <span>ต้องการ <b>${fmtD(r.needed_date)}</b></span>
+        <span>ไฟล์ <b>${(r.files || []).length}</b></span></div>
+      ${vend.length ? `<div class="vend">ร้าน/บุคคล: ${vend.map(v => (v.done ? '✓ ' : '') + esc(v.name)).join(', ')}</div>` : ''}
+    </div></div>`;
+}
+function renderList() {
+  const list = sortUrgent(filtered(live()));
+  $('#listArea').innerHTML = list.length
+    ? `<div class="list">${list.map(ticket).join('')}</div>`
+    : `<div class="empty">ไม่มีรายการในมุมมองนี้<br><br><button class="btn primary" data-act="create">+ สร้างคำขอ</button></div>`;
+}
+
+/* ======================= มุมมองปฏิทิน ======================= */
+function renderCal() {
+  const m = S.calMonth, y = m.getFullYear(), mo = m.getMonth();
+  const start = new Date(y, mo, 1).getDay(), days = new Date(y, mo + 1, 0).getDate();
+  const by = {};
+  sortUrgent(filtered(live())).forEach(r => (by[r.needed_date] ||= []).push(r));
+  const today = todayYMD();
+  let cells = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map(d => `<div class="dow">${d}</div>`).join('');
+  for (let i = 0; i < start; i++) cells += `<div class="cell empty"></div>`;
+  for (let d = 1; d <= days; d++) {
+    const ymd = `${y}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const ev = (by[ymd] || []).map(r => {
+      const over = r.status !== 'done' && ymd < today;
+      return `<div class="cev s-${r.status} ${over ? 'over' : ''}" data-act="open" data-id="${r.id}" title="${esc(pr(r.id) + ' ' + r.title + ' (' + STATUS[r.status] + ')')}">${pr(r.id).slice(3)}<span class="t"> ${esc(r.title)}</span></div>`;
+    }).join('');
+    cells += `<div class="cell ${ymd === today ? 'today' : ''}"><span class="d">${d}</span>${ev}</div>`;
+  }
+  return `<div class="calhead"><h3>${new Date(y, mo, 1).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</h3>
+    <button class="btn sm" data-act="calPrev">‹ ก่อนหน้า</button><button class="btn sm" data-act="calToday">เดือนนี้</button><button class="btn sm" data-act="calNext">ถัดไป ›</button></div>
+    <div class="cal">${cells}</div>`;
+}
+
+/* ======================= ถังขยะ ======================= */
+function renderTrash() {
+  const list = filtered(trash()).sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
+  if (!list.length) return `<div class="empty">ถังขยะว่าง งานที่เรียบร้อยครบ 30 วันจะถูกย้ายมาที่นี่อัตโนมัติ</div>`;
+  return `<p class="note">รายการในถังจะอยู่จนกว่าแอดมินจะลบถาวร กดกู้คืนเพื่อนำกลับไปที่รายการ</p>
+  ${isAdmin() ? `<div style="margin-bottom:10px"><button class="btn sm danger" data-act="purgeAll">ลบถาวรทั้งหมดในถัง (${list.length})</button></div>` : ''}
+  <div class="scroll"><table class="tbl"><thead><tr><th>เลขที่</th><th>เรื่อง</th><th>ผู้สั่ง</th><th>สถานะเดิม</th><th>ลบเมื่อ</th><th>ลบโดย</th><th></th></tr></thead><tbody>
+  ${list.map(r => `<tr>
+    <td><a href="#" data-act="open" data-id="${r.id}">${pr(r.id)}</a></td><td>${esc(r.title)}</td><td>${esc(r.requester_name)}</td>
+    <td><span class="badge s-${r.status}" style="margin:0">${STATUS[r.status]}</span></td>
+    <td>${fmtDT(r.deleted_at)}</td><td>${esc(r.deleted_by)}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-act="restore" data-id="${r.id}">กู้คืน</button>
+      ${isAdmin() ? `<button class="btn sm danger" data-act="purge" data-id="${r.id}">ลบถาวร</button>` : ''}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+/* ======================= ผู้ใช้และสิทธิ์ (แอดมิน) ======================= */
+function renderUsers() {
+  const rows = S.profiles;
+  const n = r => rows.filter(p => p.role === r && p.active).length;
+  return `<div class="bar"><div class="callout" style="flex:1">เพิ่มเจ้าหน้าที่: ให้คนนั้นสมัครบัญชีจากหน้าเข้าสู่ระบบก่อน แล้วเปลี่ยนสิทธิ์เป็น "เจ้าหน้าที่จัดซื้อ" ที่ตารางนี้ ลบเจ้าหน้าที่: เปลี่ยนกลับเป็น "ผู้สั่ง" หรือระงับบัญชี</div></div>
+  <p class="note">แอดมิน ${n('admin')} คน, เจ้าหน้าที่จัดซื้อ ${n('staff')} คน, ผู้สั่ง ${n('requester')} คน</p>
+  <div class="scroll"><table class="tbl"><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-นามสกุล</th><th>สาขา</th><th>สิทธิ์</th><th>ใช้งาน</th></tr></thead><tbody>
+  ${rows.map(p => {
+    const self = p.id === S.me.id;
+    return `<tr><td>${esc(p.username)}</td>
+      <td><input class="inp" data-uf="full_name" data-uid="${p.id}" value="${esc(p.full_name)}"></td>
+      <td><select class="inp" data-uf="branch" data-uid="${p.id}"><option value=""></option>${CONFIG.BRANCHES.map(b => `<option ${p.branch === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></td>
+      <td><select class="inp" data-uf="role" data-uid="${p.id}" ${self ? 'disabled title="เปลี่ยนสิทธิ์ตัวเองไม่ได้"' : ''}>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${p.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+      <td><input type="checkbox" data-uf="active" data-uid="${p.id}" ${p.active ? 'checked' : ''} ${self ? 'disabled' : ''}></td></tr>`;
+  }).join('')}
+  </tbody></table></div>`;
+}
+document.addEventListener('change', async e => {
+  const el = e.target; if (!el.dataset.uf) return;
+  const val = el.type === 'checkbox' ? el.checked : el.value;
+  const { error } = await sb.from('profiles').update({ [el.dataset.uf]: val }).eq('id', el.dataset.uid);
+  if (error) return toast('บันทึกไม่สำเร็จ: ' + error.message, 'err');
+  const p = S.profiles.find(x => x.id === el.dataset.uid); if (p) p[el.dataset.uf] = val;
+  toast('บันทึกแล้ว');
+  if (el.dataset.uf !== 'full_name') renderContent();
+});
+
+/* ======================= สร้างคำขอ ======================= */
+let clockTimer;
+function openCreate() {
+  S.pendingFiles = [];
+  const min = todayYMD();
+  openModal(`
+  <div class="sh-h"><h2>สร้างคำขอใหม่</h2><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
+  <form class="sh-b" id="cf">
+    <div class="clock" id="clock"></div>
+    <div class="grid2" style="margin-top:0">
+      <label class="f"><span>ประเภท</span><select class="inp" name="t">${CONFIG.REQ_TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select></label>
+      <label class="f"><span>สาขา</span><select class="inp" name="b">${CONFIG.BRANCHES.map(b => `<option ${S.me.branch === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+    </div>
+    <label class="f"><span>เรื่อง / สิ่งที่ต้องการ</span><input class="inp" name="title" required maxlength="200" placeholder="เช่น ซื้อกระดาษ A4 20 รีม, ซ่อมแอร์ห้องประชุม"></label>
+    <label class="f"><span>รายละเอียดเพิ่มเติม</span><textarea class="inp" name="d" placeholder="จำนวน ยี่ห้อ ขนาด หรือข้อมูลที่จัดซื้อควรรู้"></textarea></label>
+    <label class="f"><span>วันที่ต้องการใช้</span><input class="inp" type="date" name="need" required min="${min}" value=""></label>
+    <label class="f"><span>แนบไฟล์เอกสาร (ใบขอซื้อ รูปภาพ ใบเสนอราคา ฯลฯ)</span><input class="inp" type="file" id="fpick" multiple></label>
+    <div id="flist"></div>
+    <div class="foot"><button type="button" class="btn" data-act="close">ยกเลิก</button><button class="btn primary" id="cfBtn">ส่งคำขอ</button></div>
+  </form>`);
+  const tick = () => { const c = $('#clock'); if (!c) return clearInterval(clockTimer); c.textContent = 'วันเวลาที่แนบ: ' + new Date().toLocaleString('th-TH', { timeZone: TZ, dateStyle: 'full', timeStyle: 'medium' }) + ' น.'; };
+  clearInterval(clockTimer); tick(); clockTimer = setInterval(tick, 1000);
+  $('#fpick').onchange = e => {
+    for (const f of e.target.files) {
+      if (f.size > CONFIG.MAX_FILE_MB * 1048576) { toast(`${f.name} ใหญ่เกิน ${CONFIG.MAX_FILE_MB} MB`, 'err'); continue; }
+      S.pendingFiles.push(f);
+    }
+    e.target.value = ''; drawPending();
+  };
+  $('#cf').onsubmit = submitCreate;
+}
+function drawPending() {
+  $('#flist').innerHTML = S.pendingFiles.map((f, i) => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size)}</small></div><button type="button" class="btn sm" data-act="unpick" data-i="${i}">เอาออก</button></div>`).join('');
+}
+async function uploadFiles(files) {
+  const out = [];
+  for (const f of files) {
+    const ext = (f.name.split('.').pop() || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8);
+    const path = `${todayYMD().slice(0, 7)}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await sb.storage.from(CONFIG.BUCKET).upload(path, f, { contentType: f.type || undefined });
+    if (error) throw new Error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${error.message}`);
+    out.push({ name: f.name, path, size: f.size, type: f.type, uploaded_at: new Date().toISOString(), uploaded_by: S.me.full_name });
+  }
+  return out;
+}
+async function submitCreate(e) {
+  e.preventDefault();
+  const f = e.target, btn = $('#cfBtn');
+  btn.disabled = true; btn.textContent = 'กำลังส่ง...';
+  let files = [];
+  try {
+    files = await uploadFiles(S.pendingFiles);
+    const { error } = await sb.from('requests').insert({
+      req_type: f.t.value, branch: f.b.value, title: f.title.value.trim(), detail: f.d.value.trim(),
+      needed_date: f.need.value, files, requester_id: S.me.id, requester_name: S.me.full_name,
+    });
+    if (error) throw new Error(error.message);
+    closeModal(); toast('ส่งคำขอแล้ว เจ้าหน้าที่จัดซื้อจะได้รับแจ้งเตือนทันที');
+    await loadAll(); renderContent(); renderHeaderCounts();
+  } catch (x) {
+    if (files.length) sb.storage.from(CONFIG.BUCKET).remove(files.map(z => z.path)).catch(() => {});
+    toast(x.message, 'err'); btn.disabled = false; btn.textContent = 'ส่งคำขอ';
+  }
+}
+
+/* ======================= รายละเอียดคำขอ ======================= */
+function openDetail(id, keepVendors) {
+  const r = S.rows.find(x => x.id === id); if (!r) return;
+  if (S.modalId !== id || !keepVendors) S.editVendors = JSON.parse(JSON.stringify(r.vendors || []));
+  S.modalId = id;
+  const d = daysUntil(r.needed_date);
+  const dueTxt = r.status === 'done' ? '' : d < 0 ? ` (เลยกำหนด ${-d} วัน)` : d === 0 ? ' (วันนี้)' : ` (อีก ${d} วัน)`;
+  const staffCan = isStaff() && !r.deleted_at;
+  const ed = isAdmin() && S.adminEdit && !r.deleted_at;
+
+  const info = ed ? `
+    <div class="grid2">
+      <label class="f"><span>ประเภท</span><select class="inp" id="e_t">${CONFIG.REQ_TYPES.map(t => `<option ${r.req_type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+      <label class="f"><span>สาขา</span><select class="inp" id="e_b">${CONFIG.BRANCHES.map(b => `<option ${r.branch === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+    </div>
+    <label class="f"><span>เรื่อง</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
+    <label class="f"><span>รายละเอียด</span><textarea class="inp" id="e_d">${esc(r.detail)}</textarea></label>
+    <label class="f"><span>วันที่ต้องการใช้</span><input class="inp" type="date" id="e_need" value="${r.needed_date}"></label>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="adminEdit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="adminSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`
+  : `
+    <div class="grid2">
+      <div><span>ประเภท</span>${esc(r.req_type)}</div>
+      <div><span>สาขา</span>${esc(r.branch || '-')}</div>
+      <div><span>ผู้สั่ง</span>${esc(r.requester_name)}</div>
+      <div><span>วันเวลาที่แนบ</span>${fmtDT(r.created_at)}</div>
+      <div><span>วันที่ต้องการใช้</span><b>${fmtD(r.needed_date)}</b>${dueTxt}</div>
+      <div><span>สถานะ</span><span class="badge s-${r.deleted_at ? 'trash' : r.status}" style="margin:0">${r.deleted_at ? 'อยู่ในถังขยะ' : STATUS[r.status]}</span></div>
+      <div><span>รับทราบโดย</span>${r.acknowledged_by ? esc(r.acknowledged_by) + '<br><small>' + fmtDT(r.acknowledged_at) + '</small>' : '-'}</div>
+      <div><span>เรียบร้อยโดย</span>${r.completed_by ? esc(r.completed_by) + '<br><small>' + fmtDT(r.completed_at) + '</small>' : '-'}</div>
+    </div>
+    ${r.detail ? `<div class="box">${esc(r.detail)}</div>` : ''}`;
+
+  const files = (r.files || []).map(f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}, แนบโดย ${esc(f.uploaded_by || '-')} เมื่อ ${fmtDT(f.uploaded_at)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('') || '<p class="note">ไม่มีไฟล์แนบ</p>';
+
+  let vendorsHtml;
+  if (staffCan && r.status === 'new') {
+    vendorsHtml = `<div class="callout">กดยืนยันรับทราบก่อน แล้วจึงเพิ่มร้านหรือบุคคลที่ต้องไปซื้อหรือติดต่อ</div>`;
+  } else if (staffCan) {
+    vendorsHtml = `<div id="vrows">${S.editVendors.map((v, i) => `
+      <div class="vrow" data-i="${i}">
+        <input class="inp" data-vf="name" placeholder="ชื่อร้าน / บุคคล" value="${esc(v.name)}">
+        <input class="inp" data-vf="contact" placeholder="เบอร์โทร / ที่อยู่" value="${esc(v.contact)}">
+        <input class="inp" data-vf="item" placeholder="ซื้ออะไร / งานอะไร" value="${esc(v.item)}">
+        <label title="ซื้อ/ติดต่อแล้ว" style="white-space:nowrap;font-size:13px"><input type="checkbox" data-vf="done" ${v.done ? 'checked' : ''}> แล้ว</label>
+        <button class="btn sm" data-act="delVendor" data-i="${i}" aria-label="ลบแถวนี้">✕</button>
+      </div>`).join('')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="addVendor">+ เพิ่มร้าน / บุคคล</button></div>
+      <label class="f" style="margin-top:12px"><span>หมายเหตุเจ้าหน้าที่</span><textarea class="inp" id="staffNote" style="min-height:60px">${esc(r.staff_note)}</textarea></label>
+      <div style="text-align:right"><button class="btn dark" data-act="saveVendors" data-id="${r.id}">บันทึกร้านและหมายเหตุ</button></div>`;
+  } else {
+    const v = (r.vendors || []).filter(x => x.name);
+    vendorsHtml = (v.length ? `<div class="vlist">${v.map(x => `<div class="vi ${x.done ? 'ok' : ''}"><div style="flex:1"><b>${esc(x.name)}</b>${x.contact ? ' <span class="note">' + esc(x.contact) + '</span>' : ''}${x.item ? '<br><small>' + esc(x.item) + '</small>' : ''}</div><small>${x.done ? '✓ เรียบร้อย' : 'รอดำเนินการ'}</small></div>`).join('')}</div>` : '<p class="note">เจ้าหน้าที่ยังไม่ได้ระบุร้านหรือบุคคล</p>')
+      + (r.staff_note ? `<div class="box" style="margin-top:8px">${esc(r.staff_note)}</div>` : '');
+  }
+
+  const actions = [];
+  const left = [];
+  if (!r.deleted_at) {
+    if (staffCan && r.status === 'new') actions.push(`<button class="btn primary" data-act="ack" data-id="${r.id}">ยืนยันรับทราบ</button>`);
+    if (staffCan && r.status === 'pending') actions.push(`<button class="btn ok" data-act="done" data-id="${r.id}">เปลี่ยนเป็นเรียบร้อย</button>`);
+    if (isAdmin() && r.status === 'done') actions.push(`<button class="btn" data-act="reopen" data-id="${r.id}">ย้อนกลับเป็นรอดำเนินการ</button>`);
+    if (isAdmin() && !S.adminEdit) left.push(`<button class="btn sm" data-act="adminEdit">แก้ไขข้อมูลคำขอ</button>`);
+    if (isAdmin()) left.push(`<label class="btn sm" style="cursor:pointer">+ แนบไฟล์เพิ่ม<input type="file" multiple id="addFiles" class="hidden"></label>`);
+    if (isStaff()) left.push(`<button class="btn sm danger" data-act="trash" data-id="${r.id}">ย้ายลงถัง</button>`);
+  } else {
+    if (isStaff()) actions.push(`<button class="btn" data-act="restore" data-id="${r.id}">กู้คืน</button>`);
+    if (isAdmin()) actions.push(`<button class="btn danger" data-act="purge" data-id="${r.id}">ลบถาวร</button>`);
+  }
+
+  openModal(`
+  <div class="sh-h"><div><span class="prno">${pr(r.id)}</span><h2>${esc(r.title)}</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
+  <div class="sh-b">
+    ${info}
+    <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${files}</div>
+    <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
+    ${!isStaff() ? `<p class="note" style="margin-top:16px">คุณดูได้อย่างเดียว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการแก้ไข</p>` : ''}
+    <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
+  </div>`);
+  const af = $('#addFiles'); if (af) af.onchange = () => adminAddFiles(r.id, [...af.files]);
+}
+function readVendorInputs() {
+  document.querySelectorAll('#vrows .vrow').forEach(row => {
+    const i = +row.dataset.i, v = S.editVendors[i]; if (!v) return;
+    row.querySelectorAll('[data-vf]').forEach(inp => { v[inp.dataset.vf] = inp.type === 'checkbox' ? inp.checked : inp.value.trim(); });
+  });
+}
+
+async function patch(id, fields, okMsg) {
+  const { data, error } = await sb.from('requests').update(fields).eq('id', id).select().single();
+  if (error) { toast(error.message, 'err'); return null; }
+  const i = S.rows.findIndex(x => x.id === id); if (i >= 0) S.rows[i] = data;
+  if (okMsg) toast(okMsg);
+  renderContent(); renderHeaderCounts();
+  return data;
+}
+async function adminAddFiles(id, files) {
+  const r = S.rows.find(x => x.id === id);
+  try {
+    const up = await uploadFiles(files.filter(f => f.size <= CONFIG.MAX_FILE_MB * 1048576));
+    if (await patch(id, { files: [...(r.files || []), ...up] }, 'แนบไฟล์เพิ่มแล้ว')) openDetail(id);
+  } catch (x) { toast(x.message, 'err'); }
+}
+async function purge(ids) {
+  const rows = S.rows.filter(r => ids.includes(r.id));
+  const paths = rows.flatMap(r => (r.files || []).map(f => f.path));
+  if (paths.length) await sb.storage.from(CONFIG.BUCKET).remove(paths).catch(() => {});
+  const { error } = await sb.from('requests').delete().in('id', ids);
+  if (error) return toast(error.message, 'err');
+  S.rows = S.rows.filter(r => !ids.includes(r.id));
+  toast(`ลบถาวรแล้ว ${ids.length} รายการ`);
+  closeModal(); renderContent(); renderHeaderCounts();
+}
+
+/* ======================= ส่งออก Excel ======================= */
+function exportExcel() {
+  const inTrash = S.view === 'trash';
+  const list = inTrash ? filtered(trash()) : sortUrgent(filtered(live()));
+  if (!list.length) return toast('ไม่มีรายการให้ส่งออก', 'err');
+  const bk = iso => iso ? new Date(iso).toLocaleString('th-TH', { timeZone: TZ }) : '';
+  const rows = list.map(r => {
+    const o = {
+      'เลขที่': pr(r.id), 'ประเภท': r.req_type, 'เรื่อง': r.title, 'รายละเอียด': r.detail || '', 'สาขา': r.branch || '',
+      'ผู้สั่ง': r.requester_name, 'วันเวลาที่แนบ': bk(r.created_at), 'วันที่ต้องการใช้': fmtD(r.needed_date),
+      'สถานะ': STATUS[r.status],
+      'ร้าน / บุคคล': (r.vendors || []).filter(v => v.name).map(v => `${v.name}${v.item ? ' (' + v.item + ')' : ''}${v.contact ? ' ' + v.contact : ''}${v.done ? ' ✓' : ''}`).join('\n'),
+      'หมายเหตุเจ้าหน้าที่': r.staff_note || '',
+      'รับทราบโดย': r.acknowledged_by || '', 'เวลารับทราบ': bk(r.acknowledged_at),
+      'เรียบร้อยโดย': r.completed_by || '', 'เวลาเรียบร้อย': bk(r.completed_at),
+      'จำนวนไฟล์': (r.files || []).length, 'ชื่อไฟล์': (r.files || []).map(f => f.name).join(', '),
+    };
+    if (inTrash) { o['ลบเมื่อ'] = bk(r.deleted_at); o['ลบโดย'] = r.deleted_by || ''; }
+    return o;
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['เรื่อง', 'รายละเอียด', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์'].includes(k) ? 36 : 18 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, inTrash ? 'ถังขยะ' : 'รายการจัดซื้อ');
+  XLSX.writeFile(wb, `${inTrash ? 'ถังขยะจัดซื้อ' : 'รายการจัดซื้อ'}_${todayYMD()}.xlsx`);
+}
+
+/* ======================= modal ======================= */
+function openModal(html) { $('#sheet').innerHTML = html; $('#modal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
+function closeModal() { $('#modal').classList.add('hidden'); document.body.style.overflow = ''; S.modalId = null; S.adminEdit = false; clearInterval(clockTimer); }
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeModal();
+  if (e.key === 'Enter' && e.target.matches('.ticket')) e.target.click();
+});
+
+/* ======================= ปุ่มทั้งหมด ======================= */
+const now = () => new Date().toISOString();
+const A = {
+  authmode: el => renderAuth(el.dataset.v),
+  logout: async () => { await sb.auth.signOut(); location.reload(); },
+  notif: async () => { await Notification.requestPermission(); renderShell(); },
+  gonew: () => { S.view = 'list'; S.filter = 'new'; renderShell(); },
+  tab: el => { S.view = el.dataset.v; renderShell(); },
+  filter: el => { S.filter = el.dataset.v; renderContent(); },
+  create: () => openCreate(),
+  unpick: el => { S.pendingFiles.splice(+el.dataset.i, 1); drawPending(); },
+  close: () => closeModal(),
+  open: (el, id) => { S.adminEdit = false; openDetail(id); },
+  export: () => exportExcel(),
+  calPrev: () => { S.calMonth.setMonth(S.calMonth.getMonth() - 1); renderContent(); },
+  calNext: () => { S.calMonth.setMonth(S.calMonth.getMonth() + 1); renderContent(); },
+  calToday: () => { S.calMonth = new Date(); S.calMonth.setDate(1); renderContent(); },
+  file: async el => {
+    const w = window.open('', '_blank');
+    const { data, error } = await sb.storage.from(CONFIG.BUCKET).createSignedUrl(el.dataset.path, 600);
+    if (error) { w && w.close(); return toast('เปิดไฟล์ไม่สำเร็จ', 'err'); }
+    if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
+  },
+  ack: async (el, id) => { if (await patch(id, { status: 'pending', acknowledged_by: S.me.full_name, acknowledged_at: now() }, 'รับทราบแล้ว สถานะเป็นรอดำเนินการ')) openDetail(id); },
+  addVendor: () => { readVendorInputs(); S.editVendors.push({ name: '', contact: '', item: '', done: false }); openDetail(S.modalId, true); setTimeout(() => { const l = document.querySelectorAll('#vrows [data-vf=name]'); l[l.length - 1]?.focus(); }, 0); },
+  delVendor: el => { readVendorInputs(); S.editVendors.splice(+el.dataset.i, 1); openDetail(S.modalId, true); },
+  saveVendors: async (el, id) => {
+    readVendorInputs();
+    const vendors = S.editVendors.filter(v => v.name);
+    if (await patch(id, { vendors, staff_note: ($('#staffNote')?.value || '').trim() || null }, 'บันทึกร้านและหมายเหตุแล้ว')) openDetail(id);
+  },
+  done: async (el, id) => {
+    readVendorInputs();
+    const r = S.rows.find(x => x.id === id);
+    const changed = JSON.stringify(S.editVendors.filter(v => v.name)) !== JSON.stringify(r.vendors || []);
+    if (!confirm(`ยืนยันเปลี่ยน ${pr(id)} เป็น "เรียบร้อย"?`)) return;
+    const fields = { status: 'done', completed_by: S.me.full_name, completed_at: now() };
+    if (changed) fields.vendors = S.editVendors.filter(v => v.name);
+    if (await patch(id, fields, 'เปลี่ยนเป็นเรียบร้อยแล้ว')) closeModal();
+  },
+  reopen: async (el, id) => { if (await patch(id, { status: 'pending', completed_by: null, completed_at: null }, 'ย้อนกลับเป็นรอดำเนินการแล้ว')) openDetail(id); },
+  adminEdit: () => { S.adminEdit = !S.adminEdit; openDetail(S.modalId, true); },
+  adminSave: async (el, id) => {
+    const t = $('#e_title').value.trim(); if (!t) return toast('ใส่เรื่องก่อนบันทึก', 'err');
+    S.adminEdit = false;
+    if (await patch(id, { req_type: $('#e_t').value, branch: $('#e_b').value, title: t, detail: $('#e_d').value.trim(), needed_date: $('#e_need').value }, 'บันทึกการแก้ไขแล้ว')) openDetail(id);
+  },
+  trash: async (el, id) => { if (!confirm(`ย้าย ${pr(id)} ลงถังขยะ? กู้คืนได้ภายหลัง`)) return; if (await patch(id, { deleted_at: now(), deleted_by: S.me.full_name }, 'ย้ายลงถังขยะแล้ว')) closeModal(); },
+  restore: async (el, id) => { if (await patch(id, { deleted_at: null, deleted_by: null, restored_at: now() }, 'กู้คืนแล้ว')) closeModal(); },
+  purge: async (el, id) => { if (confirm(`ลบ ${pr(id)} ถาวรพร้อมไฟล์แนบ? กู้คืนไม่ได้อีก`)) await purge([id]); },
+  purgeAll: async () => { const ids = filtered(trash()).map(r => r.id); if (confirm(`ลบถาวรทั้งหมด ${ids.length} รายการพร้อมไฟล์แนบ? กู้คืนไม่ได้อีก`)) await purge(ids); },
+};
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const fn = A[el.dataset.act]; if (!fn) return;
+  if (el.tagName === 'A' || el.dataset.act === 'open') e.preventDefault();
+  fn(el, el.dataset.id ? Number(el.dataset.id) : null);
+});
+
+init();
+</script>
+</body>
+</html>
