@@ -169,6 +169,45 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .hist small{color:var(--muted)}
 .chg s{color:var(--muted)}
 .soundbar{display:block;width:100%;border:0;background:var(--amber-bg);color:var(--amber);font-weight:600;padding:9px 16px;cursor:pointer;text-align:center}
+/* สรุปวันนี้ */
+.today-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:18px 0 0}
+.today-h h2{margin:0 auto 0 0;font-size:22px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:14px 0 18px}
+.stat{background:var(--surface);padding:10px 14px}
+.stat b{display:block;font-size:28px;line-height:1.15;font-variant-numeric:tabular-nums}
+.stat span{font-size:12.5px;color:var(--muted)}
+.stat.hot b{color:var(--red)}
+.grp{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--muted);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.grp h3{margin:0;font-size:16px;display:flex;gap:8px;align-items:baseline}
+.grp .step{color:var(--muted);font-variant-numeric:tabular-nums}
+.grp .cnt{font-size:13px;color:var(--muted);font-weight:500}
+.grp>p{margin:2px 0 6px;font-size:13px;color:var(--muted)}
+.g-attn{border-left-color:var(--blue)} .g-over{border-left-color:var(--red)} .g-today{border-left-color:var(--red)} .g-soon{border-left-color:var(--amber)} .g-plan{border-left-color:var(--green)}
+.trow{display:grid;grid-template-columns:86px 84px 1fr auto;gap:10px;align-items:center;padding:8px 4px;border-top:1px solid var(--line);cursor:pointer}
+.trow:hover{background:var(--paper)}
+.tdue{font-weight:700;font-size:13px}
+.g-over .tdue,.g-today .tdue{color:var(--red)} .g-soon .tdue{color:var(--amber)}
+.tt{min-width:0}
+.tt b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tt small{color:var(--muted);font-size:12px}
+.vs{font-size:12px;color:var(--muted);white-space:nowrap}
+.vs.warn{color:var(--amber);font-weight:600}
+.shop{border-top:1px solid var(--line);padding:10px 4px 6px}
+.shop h5{margin:0;font-size:15px}
+.shop h5 small{font-weight:400;color:var(--muted);margin-left:6px}
+.shop ul{margin:4px 0 0;padding-left:18px;font-size:14px}
+.shop li{cursor:pointer}
+@media (max-width:640px){
+  .trow{grid-template-columns:70px 1fr}
+  .trow .prno{display:none}
+  .trow .vs{grid-column:2}
+}
+.lines{margin:6px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.lines .lh{margin:0 0 8px;font-size:15px}
+.line{display:grid;grid-template-columns:28px 1fr auto;gap:6px;align-items:center;margin-bottom:6px}
+.line .ln{color:var(--muted);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.ilist{margin:0;padding-left:22px}
+.ilist li{padding:2px 0}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -191,11 +230,11 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 /* ======================= ตั้งค่า ======================= */
 const CONFIG = {
   SUPABASE_URL: 'https://fzozxftfxtvbmuryiihf.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_WdCOu73wY1xQuM70rs6NbA_vDNO5_0-',   // Publishable key (ขึ้นต้นด้วย sb_publishable_)
+  SUPABASE_ANON_KEY: 'sb_publishable_WdCOu73wY1xQuM70rs6NbA_vDNO5_0-',   // Publishable key
   EMAIL_DOMAIN: 'purchase.local',      // ใช้แปลง "ชื่อผู้ใช้" เป็นอีเมลภายใน ไม่มีการส่งเมลจริง
   BUCKET: 'purchase-files',
-  BRANCHES: ['สำนักงานใหญ่','ปลวกแดง'],
-  REQ_TYPES: ['สั่งซื้อ','สั่งซ่อม','สั่งงาน / บริการ','อื่นๆ'],
+  BRANCHES: ['สำนักงานใหญ่','สาขา 2','สาขา 3','สาขา 4','สาขา 5','สาขา 6','สาขา 7','สาขา 8','สาขา 9'],
+  ITEM_GROUPS: [['purchase', 'จัดซื้อ'], ['moririn', 'โมริริน']],
   MAX_FILE_MB: 50,
 };
 
@@ -266,6 +305,23 @@ const S = {
 const isStaff = () => S.me && (S.me.role === 'staff' || S.me.role === 'admin');
 const isAdmin = () => S.me && S.me.role === 'admin';
 const live = () => S.rows.filter(r => !r.deleted_at);
+const itemsOf = r => { const it = r.items || {}; const o = {}; CONFIG.ITEM_GROUPS.forEach(([k]) => o[k] = (it[k] || []).filter(Boolean)); return o; };
+function linesBlock(key, label, values) {
+  const vals = values && values.length ? values : [''];
+  return `<div class="lines" data-g="${key}"><h4 class="lh">${label}</h4>
+    <div class="lrows">${vals.map(v => lineRow(v)).join('')}</div>
+    <button type="button" class="btn sm" data-act="lineAdd">+ เพิ่มบรรทัด</button></div>`;
+}
+const lineRow = v => `<div class="line"><span class="ln"></span><input class="inp" value="${esc(v)}" maxlength="300"><button type="button" class="btn sm" data-act="lineDel" aria-label="ลบบรรทัดนี้">✕</button></div>`;
+function renumber(box) { box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; l.querySelector('input').placeholder = 'บรรทัดที่ ' + (i + 1); }); }
+function readLines(root) { const o = {}; root.querySelectorAll('.lines').forEach(b => o[b.dataset.g] = [...b.querySelectorAll('.line input')].map(i => i.value.trim()).filter(Boolean)); return o; }
+function initLines(root) { root.querySelectorAll('.lines .lrows').forEach(renumber); }
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.closest('.line')) return;
+  e.preventDefault();
+  const row = e.target.closest('.line'); row.insertAdjacentHTML('afterend', lineRow(''));
+  renumber(row.parentElement); row.nextElementSibling.querySelector('input').focus();
+});
 const needsAttn = r => r.status === 'new' || r.edit_flag;
 const short = (t, n = 120) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + '…' : t; };
 function changeLine(c) {
@@ -280,7 +336,7 @@ async function init() {
     const u = new URL(location.href); u.searchParams.set('openExternalBrowser', '1');
     document.body.insertAdjacentHTML('afterbegin', `<div class="linebar">เปิดผ่าน LINE อยู่ การแจ้งเตือนอาจไม่ทำงาน <a href="${esc(u)}">เปิดในเบราว์เซอร์</a></div>`);
   }
-  if (CONFIG.SUPABASE_URL.includes('YOUR-PROJECT')) {
+  if (!CONFIG.SUPABASE_URL || CONFIG.SUPABASE_URL.includes('YOUR-PROJECT')) {
     $('#app').innerHTML = `<div class="auth"><div class="card"><h1>ยังไม่ได้เชื่อมฐานข้อมูล</h1><p>เปิดไฟล์นี้แล้วใส่ SUPABASE_URL และ SUPABASE_ANON_KEY ในส่วน CONFIG ด้านบนของสคริปต์</p></div></div>`;
     return;
   }
@@ -293,7 +349,7 @@ function renderAuth(mode) {
   const br = CONFIG.BRANCHES.map(b => `<option>${esc(b)}</option>`).join('');
   $('#app').innerHTML = `
   <div class="auth"><div class="card">
-    <h1>ระบบจัดซื้อ</h1>
+    <h1>ระบบรับใบงาน_จัดซื้อ</h1>
     <p>${mode === 'login' ? 'เข้าสู่ระบบเพื่อส่งคำขอหรือดูสถานะงาน' : 'สมัครบัญชีใหม่ (บัญชีใหม่จะเป็นผู้สั่ง แอดมินเปลี่ยนสิทธิ์ให้ภายหลัง)'}</p>
     <form id="authf">
       <label class="f"><span>ชื่อผู้ใช้ (เช่น รหัสพนักงาน)</span><input class="inp" name="u" required autocomplete="username" pattern="[A-Za-z0-9._\\-]{3,}" title="ภาษาอังกฤษหรือตัวเลข อย่างน้อย 3 ตัว"></label>
@@ -333,6 +389,7 @@ async function enter() {
   if (!data.active) { toast('บัญชีนี้ถูกระงับ ติดต่อแอดมิน', 'err'); await sb.auth.signOut(); return renderAuth('login'); }
   S.me = data;
   S.calMonth = new Date(); S.calMonth.setDate(1);
+  S.view = isStaff() ? 'today' : 'list';
   if (isStaff()) { try { await sb.rpc('auto_trash_done'); } catch {} }
   await loadAll();
   renderShell();
@@ -383,13 +440,14 @@ function subscribe() {
 /* ======================= โครงหน้า ======================= */
 function renderShell() {
   const tabs = [['list', 'รายการ'], ['cal', 'ปฏิทิน']];
+  if (isStaff()) tabs.unshift(['today', 'สรุปวันนี้']);
   if (isStaff()) tabs.push(['trash', 'ถังขยะ']);
   if (isAdmin()) tabs.push(['users', 'ผู้ใช้และสิทธิ์']);
   if (!tabs.some(t => t[0] === S.view)) S.view = 'list';
   const canNotif = 'Notification' in window && Notification.permission === 'default' && isStaff();
   $('#app').innerHTML = `
   <header class="top"><div class="wrap">
-    <div class="brand">ระบบจัดซื้อ<small>สั่งซื้อ สั่งซ่อม สั่งงาน</small></div>
+    <div class="brand">ระบบรับใบงาน_จัดซื้อ</div>
     <div class="who"><b>${esc(S.me.full_name || S.me.username)}</b>${ROLE[S.me.role]}${S.me.branch ? ' / ' + esc(S.me.branch) : ''}</div>
     ${canNotif ? `<button class="iconbtn" data-act="notif" title="เปิดการแจ้งเตือนบนเครื่องนี้">เปิดแจ้งเตือน</button>` : ''}
     ${isStaff() ? `<button class="iconbtn bell" data-act="gonew" title="งานใหม่และงานที่มีการแก้ไข รอรับทราบ">🔔<span class="n hidden" id="bellN"></span></button>` : ''}
@@ -408,7 +466,7 @@ function renderHeaderCounts() {
   const n = live().filter(needsAttn).length;
   const b = $('#bellN'); if (b) { b.textContent = n; b.classList.toggle('hidden', !n); }
   const t = $('#trashN'); if (t) t.textContent = trash().length;
-  document.title = (isStaff() && n ? `(${n}) ` : '') + 'ระบบจัดซื้อ';
+  document.title = (isStaff() && n ? `(${n}) ` : '') + 'ระบบรับใบงาน_จัดซื้อ';
 }
 
 function filtered(base) {
@@ -421,7 +479,7 @@ function filtered(base) {
     }
     if (S.type && r.req_type !== S.type) return false;
     if (q) {
-      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, r.req_type, ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
+      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, ...Object.values(itemsOf(r)).flat(), ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -443,8 +501,7 @@ function toolbar(withStatus) {
   if (isStaff()) chips.unshift(['attn', 'ต้องรับทราบ']);
   return `<div class="bar">
     ${withStatus ? `<div class="chips">${chips.map(([k, l]) => `<button class="chip ${S.filter === k ? 'on' : ''}" data-act="filter" data-v="${k}">${l} ${counts[k]}</button>`).join('')}</div>` : ''}
-    <input class="search" id="q" placeholder="ค้นหาเลขที่ เรื่อง ผู้สั่ง ร้าน" value="${esc(S.q)}">
-    <select class="sel" id="typeSel"><option value="">ทุกประเภท</option>${CONFIG.REQ_TYPES.map(t => `<option ${S.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+    <input class="search" id="q" placeholder="ค้นหาเลขที่ ชื่องาน แผนก รายการ ผู้สั่ง ร้าน" value="${esc(S.q)}">
     <button class="btn" data-act="export">ส่งออก Excel</button>
     ${S.view !== 'trash' ? `<button class="btn primary" data-act="create">+ สร้างคำขอ</button>` : ''}
   </div>`;
@@ -453,7 +510,8 @@ function toolbar(withStatus) {
 function renderContent() {
   const c = $('#content'); if (!c) return;
   const focusQ = document.activeElement && document.activeElement.id === 'q';
-  if (S.view === 'list') c.innerHTML = toolbar(true) + `<div id="listArea"></div>`, renderList();
+  if (S.view === 'today') c.innerHTML = renderToday();
+  else if (S.view === 'list') c.innerHTML = toolbar(true) + `<div id="listArea"></div>`, renderList();
   else if (S.view === 'cal') c.innerHTML = toolbar(true) + renderCal();
   else if (S.view === 'trash') c.innerHTML = toolbar(false) + renderTrash();
   else if (S.view === 'users') c.innerHTML = renderUsers();
@@ -479,14 +537,15 @@ function ticket(r) {
   return `<div class="ticket ${cls} ${r.edit_flag ? 'edited' : ''}" role="button" tabindex="0" data-act="open" data-id="${r.id}">
     <div class="due"><b>${big}</b><span>${small}</span></div>
     <div class="tb">
-      <div class="r1"><span class="prno">${pr(r.id)}</span><span class="type">${esc(r.req_type)}</span>
+      <div class="r1"><span class="prno">${pr(r.id)}</span><span class="type">${esc(r.branch || '')}</span>
         ${r.status === 'new' ? '<span class="new-dot" title="ยังไม่มีเจ้าหน้าที่รับทราบ"></span>' : ''}
         ${r.edit_flag ? '<span class="badge s-edit">มีการแก้ไข</span>' : ''}
         <span class="badge s-${r.status}" ${r.edit_flag ? 'style="margin-left:0"' : ''}>${STATUS[r.status]}</span></div>
       <div class="ttl">${esc(r.title)}</div>
-      <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b>${r.branch ? ' (' + esc(r.branch) + ')' : ''}</span>
+      <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b></span>
         <span>แนบเมื่อ <b>${fmtDT(r.created_at)}</b></span>
         <span>ต้องการ <b>${fmtD(r.needed_date)}</b></span>
+        ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const n = itemsOf(r)[k].length; return n ? `<span>${l} <b>${n}</b> รายการ</span>` : ''; }).join('')}
         <span>ไฟล์ <b>${(r.files || []).length}</b></span></div>
       ${vend.length ? `<div class="vend">ร้าน/บุคคล: ${vend.map(v => (v.done ? '✓ ' : '') + esc(v.name)).join(', ')}</div>` : ''}
     </div></div>`;
@@ -497,6 +556,116 @@ function renderList() {
     ? `<div class="list">${list.map(ticket).join('')}</div>`
     : `<div class="empty">ไม่มีรายการในมุมมองนี้<br><br><button class="btn primary" data-act="create">+ สร้างคำขอ</button></div>`;
 }
+
+/* ======================= สรุปวันนี้ ======================= */
+const bkDay = iso => iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: TZ }) : '';
+const dueText = r => { const d = daysUntil(r.needed_date); return d < 0 ? `เลย ${-d} วัน` : d === 0 ? 'ใช้วันนี้' : `อีก ${d} วัน`; };
+function vendStat(r) {
+  if (r.edit_flag) return ['มีการแก้ไข', true];
+  if (r.status === 'new') return ['รอรับทราบ', true];
+  const v = (r.vendors || []).filter(x => x.name);
+  if (!v.length) return ['ยังไม่ระบุร้าน', true];
+  return [`ร้านเสร็จ ${v.filter(x => x.done).length}/${v.length}`, false];
+}
+function buildToday() {
+  const t = todayYMD();
+  const open = live().filter(r => r.status !== 'done')
+    .sort((a, b) => a.needed_date.localeCompare(b.needed_date) || a.created_at.localeCompare(b.created_at));
+  const pick = f => open.filter(f);
+  const dd = r => daysUntil(r.needed_date);
+  const groups = [
+    { cls: 'g-attn', title: 'รับทราบงานก่อน', hint: 'งานใหม่และงานที่ถูกแก้ไข ใช้เวลาไม่นาน และทำให้ผู้สั่งรู้ว่าจัดซื้อเห็นงานแล้ว', items: pick(needsAttn) },
+    { cls: 'g-over', title: 'เลยกำหนดแล้ว', hint: 'ผู้สั่งต้องใช้ไปแล้ว รีบจัดการหรือโทรแจ้งผู้สั่งว่าจะได้เมื่อไร', items: pick(r => dd(r) < 0) },
+    { cls: 'g-today', title: 'ต้องใช้วันนี้', hint: 'ต้องได้ของหรือได้งานภายในวันนี้', items: pick(r => dd(r) === 0) },
+    { cls: 'g-soon', title: 'ต้องใช้ภายใน 3 วัน', hint: 'ควรออกซื้อหรือสั่งงานวันนี้ถึงพรุ่งนี้', items: pick(r => dd(r) >= 1 && dd(r) <= 3) },
+    { cls: 'g-week', title: 'ต้องใช้ภายใน 7 วัน', hint: 'เริ่มติดต่อร้านหรือขอใบเสนอราคาไว้ก่อน', items: pick(r => dd(r) >= 4 && dd(r) <= 7) },
+  ];
+  // รวมงานตามร้าน เพื่อออกไปทีเดียวได้หลายงาน
+  const plan = {}, noVendor = [];
+  open.filter(r => r.status === 'pending' && dd(r) <= 7).forEach(r => {
+    const vs = (r.vendors || []).filter(x => x.name);
+    if (!vs.length) { noVendor.push(r); return; }
+    vs.filter(x => !x.done).forEach(x => {
+      const k = x.name.trim().toLowerCase();
+      const s = plan[k] ||= { name: x.name.trim(), contact: '', items: [], first: r.needed_date };
+      if (!s.contact && x.contact) s.contact = x.contact;
+      s.items.push({ r, item: x.item });
+      if (r.needed_date < s.first) s.first = r.needed_date;
+    });
+  });
+  const shops = Object.values(plan).sort((a, b) => a.first.localeCompare(b.first) || b.items.length - a.items.length);
+  const stats = {
+    open: open.length,
+    over: groups[1].items.length,
+    today: groups[2].items.length,
+    inToday: live().filter(r => bkDay(r.created_at) === t).length,
+    doneToday: S.rows.filter(r => r.status === 'done' && bkDay(r.completed_at) === t).length,
+  };
+  return { groups, shops, noVendor, stats };
+}
+function trow(r) {
+  const [vs, warn] = vendStat(r);
+  return `<div class="trow" role="button" tabindex="0" data-act="open" data-id="${r.id}">
+    <span class="tdue">${dueText(r)}</span><span class="prno">${pr(r.id)}</span>
+    <span class="tt"><b>${esc(r.title)}</b><small>${esc(r.requester_name)}${r.branch ? ', แผนก' + esc(r.branch) : ''}, ต้องการ ${fmtD(r.needed_date)}</small></span>
+    <span class="vs ${warn ? 'warn' : ''}">${vs}</span></div>`;
+}
+function renderToday() {
+  const { groups, shops, noVendor, stats } = buildToday();
+  const dateTxt = new Date().toLocaleDateString('th-TH', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const vis = groups.filter(g => g.items.length);
+  let step = 0;
+  const groupsHtml = vis.map(g => `<section class="grp ${g.cls}">
+      <h3><span class="step">${++step}.</span>${g.title}<span class="cnt">${g.items.length} งาน</span></h3><p>${g.hint}</p>
+      ${g.items.map(trow).join('')}</section>`).join('');
+  const planHtml = (shops.length || noVendor.length) ? `<section class="grp g-plan">
+      <h3>แผนออกซื้อและติดต่อ<span class="cnt">${shops.length} ร้าน/บุคคล</span></h3>
+      <p>รวมงานที่ต้องใช้ภายใน 7 วันตามร้าน เรียงจากร้านที่มีงานใกล้กำหนดที่สุด ไปร้านเดียวจัดการได้หลายงาน</p>
+      ${shops.map(s => `<div class="shop"><h5>${esc(s.name)}${s.contact ? `<small>${esc(s.contact)}</small>` : ''}</h5>
+        <ul>${s.items.map(x => `<li data-act="open" data-id="${x.r.id}">${pr(x.r.id)} ${esc(x.item || x.r.title)} <span class="note">(${dueText(x.r)})</span></li>`).join('')}</ul></div>`).join('')}
+      ${noVendor.length ? `<div class="shop"><h5>ยังไม่ได้ระบุร้าน<small>เปิดงานแล้วเพิ่มร้านหรือบุคคล เพื่อให้เข้าแผน</small></h5>
+        <ul>${noVendor.map(r => `<li data-act="open" data-id="${r.id}">${pr(r.id)} ${esc(r.title)} <span class="note">(${dueText(r)})</span></li>`).join('')}</ul></div>` : ''}
+    </section>` : '';
+  return `<div class="today-h"><h2>${dateTxt}</h2>
+      <button class="btn" data-act="copySummary">คัดลอกสรุปส่ง LINE</button>
+      <button class="btn primary" data-act="create">+ สร้างคำขอ</button></div>
+    <div class="stats">
+      <div class="stat"><b>${stats.open}</b><span>งานค้างทั้งหมด</span></div>
+      <div class="stat ${stats.over ? 'hot' : ''}"><b>${stats.over}</b><span>เลยกำหนด</span></div>
+      <div class="stat ${stats.today ? 'hot' : ''}"><b>${stats.today}</b><span>ต้องใช้วันนี้</span></div>
+      <div class="stat"><b>${stats.inToday}</b><span>รับเข้าวันนี้</span></div>
+      <div class="stat"><b>${stats.doneToday}</b><span>ปิดงานวันนี้</span></div>
+    </div>
+    ${groupsHtml || `<div class="empty" style="margin-bottom:12px">ไม่มีงานเร่งด่วนใน 7 วันนี้ ดูงานทั้งหมดได้ที่แท็บรายการ</div>`}
+    ${planHtml}<div style="height:40px"></div>`;
+}
+function summaryText() {
+  const { groups, shops, noVendor, stats } = buildToday();
+  const L = [`สรุประบบรับใบงาน_จัดซื้อ ${new Date().toLocaleDateString('th-TH', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'short', year: '2-digit' })}`,
+    `งานค้าง ${stats.open} งาน, เลยกำหนด ${stats.over}, ต้องใช้วันนี้ ${stats.today}, รับเข้าวันนี้ ${stats.inToday}, ปิดงานวันนี้ ${stats.doneToday}`];
+  let n = 0;
+  groups.forEach(g => {
+    if (!g.items.length) return;
+    L.push('', `${++n}. ${g.title} (${g.items.length})`);
+    g.items.forEach(r => L.push(`- ${pr(r.id)} ${r.title} [${dueText(r)}] ${r.requester_name || ''}${r.branch ? ' / ' + r.branch : ''}`));
+  });
+  if (shops.length) {
+    L.push('', 'แผนออกซื้อ / ติดต่อ');
+    shops.forEach(s => L.push(`- ${s.name}${s.contact ? ' (' + s.contact + ')' : ''}: ${s.items.map(x => pr(x.r.id) + (x.item ? ' ' + x.item : '')).join(', ')}`));
+  }
+  if (noVendor.length) L.push('', 'ยังไม่ระบุร้าน: ' + noVendor.map(r => pr(r.id)).join(', '));
+  return L.join('\n');
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+}
+// ขึ้นวันใหม่แล้วให้สรุปคำนวณใหม่เอง
+let lastDay = todayYMD();
+setInterval(() => { const d = todayYMD(); if (d !== lastDay) { lastDay = d; if (S.me && $('#modal').classList.contains('hidden')) renderContent(); } }, 60000);
 
 /* ======================= มุมมองปฏิทิน ======================= */
 function renderCal() {
@@ -573,11 +742,10 @@ function openCreate() {
   <form class="sh-b" id="cf">
     <div class="clock" id="clock"></div>
     <div class="grid2" style="margin-top:0">
-      <label class="f"><span>ประเภท</span><select class="inp" name="t">${CONFIG.REQ_TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select></label>
-      <label class="f"><span>สาขา</span><select class="inp" name="b">${CONFIG.BRANCHES.map(b => `<option ${S.me.branch === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+      <label class="f"><span>ชื่องาน</span><input class="inp" name="title" required maxlength="200"></label>
+      <label class="f"><span>แผนก</span><input class="inp" name="b" required maxlength="100"></label>
     </div>
-    <label class="f"><span>เรื่อง / สิ่งที่ต้องการ</span><input class="inp" name="title" required maxlength="200" placeholder="เช่น ซื้อกระดาษ A4 20 รีม, ซ่อมแอร์ห้องประชุม"></label>
-    <label class="f"><span>รายละเอียดเพิ่มเติม</span><textarea class="inp" name="d" placeholder="จำนวน ยี่ห้อ ขนาด หรือข้อมูลที่จัดซื้อควรรู้"></textarea></label>
+    ${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l)).join('')}
     <label class="f"><span>วันที่ต้องการใช้</span><input class="inp" type="date" name="need" required min="${min}" value=""></label>
     <label class="f"><span>แนบไฟล์เอกสาร (ใบขอซื้อ รูปภาพ ใบเสนอราคา ฯลฯ)</span><input class="inp" type="file" id="fpick" multiple></label>
     <div id="flist"></div>
@@ -585,6 +753,7 @@ function openCreate() {
   </form>`);
   const tick = () => { const c = $('#clock'); if (!c) return clearInterval(clockTimer); c.textContent = 'วันเวลาที่แนบ: ' + new Date().toLocaleString('th-TH', { timeZone: TZ, dateStyle: 'full', timeStyle: 'medium' }) + ' น.'; };
   clearInterval(clockTimer); tick(); clockTimer = setInterval(tick, 1000);
+  initLines($('#cf'));
   $('#fpick').onchange = e => {
     for (const f of e.target.files) {
       if (f.size > CONFIG.MAX_FILE_MB * 1048576) { toast(`${f.name} ใหญ่เกิน ${CONFIG.MAX_FILE_MB} MB`, 'err'); continue; }
@@ -611,12 +780,14 @@ async function uploadFiles(files) {
 async function submitCreate(e) {
   e.preventDefault();
   const f = e.target, btn = $('#cfBtn');
+  const items = readLines(f);
+  if (!Object.values(items).some(a => a.length)) return toast('กรอกรายการจัดซื้อหรือโมริรินอย่างน้อย 1 บรรทัด', 'err');
   btn.disabled = true; btn.textContent = 'กำลังส่ง...';
   let files = [];
   try {
     files = await uploadFiles(S.pendingFiles);
     const { error } = await sb.from('requests').insert({
-      req_type: f.t.value, branch: f.b.value, title: f.title.value.trim(), detail: f.d.value.trim(),
+      req_type: 'ใบงาน', branch: f.b.value.trim(), title: f.title.value.trim(), items,
       needed_date: f.need.value, files, requester_id: S.me.id, requester_name: S.me.full_name,
     });
     if (error) throw new Error(error.message);
@@ -640,17 +811,15 @@ function openDetail(id, keepVendors) {
 
   const info = ed ? `
     <div class="grid2">
-      <label class="f"><span>ประเภท</span><select class="inp" id="e_t">${CONFIG.REQ_TYPES.map(t => `<option ${r.req_type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
-      <label class="f"><span>สาขา</span><select class="inp" id="e_b">${CONFIG.BRANCHES.map(b => `<option ${r.branch === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+      <label class="f"><span>ชื่องาน</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
+      <label class="f"><span>แผนก</span><input class="inp" id="e_b" value="${esc(r.branch)}"></label>
     </div>
-    <label class="f"><span>เรื่อง</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
-    <label class="f"><span>รายละเอียด</span><textarea class="inp" id="e_d">${esc(r.detail)}</textarea></label>
+    <div id="e_items">${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l, itemsOf(r)[k])).join('')}</div>
     <label class="f"><span>วันที่ต้องการใช้</span><input class="inp" type="date" id="e_need" value="${r.needed_date}"></label>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="adminEdit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="adminSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`
   : `
     <div class="grid2">
-      <div><span>ประเภท</span>${esc(r.req_type)}</div>
-      <div><span>สาขา</span>${esc(r.branch || '-')}</div>
+      <div><span>แผนก</span>${esc(r.branch || '-')}</div>
       <div><span>ผู้สั่ง</span>${esc(r.requester_name)}</div>
       <div><span>วันเวลาที่แนบ</span>${fmtDT(r.created_at)}</div>
       <div><span>วันที่ต้องการใช้</span><b>${fmtD(r.needed_date)}</b>${dueTxt}</div>
@@ -658,7 +827,8 @@ function openDetail(id, keepVendors) {
       <div><span>รับทราบโดย</span>${r.acknowledged_by ? esc(r.acknowledged_by) + '<br><small>' + fmtDT(r.acknowledged_at) + '</small>' : '-'}</div>
       <div><span>เรียบร้อยโดย</span>${r.completed_by ? esc(r.completed_by) + '<br><small>' + fmtDT(r.completed_at) + '</small>' : '-'}</div>
     </div>
-    ${r.detail ? `<div class="box">${esc(r.detail)}</div>` : ''}`;
+    ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const a = itemsOf(r)[k]; return a.length ? `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>` : ''; }).join('')}
+    ${r.detail ? `<div class="sec"><h4>รายละเอียด</h4><div class="box">${esc(r.detail)}</div></div>` : ''}`;
 
   const files = (r.files || []).map(f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}, แนบโดย ${esc(f.uploaded_by || '-')} เมื่อ ${fmtDT(f.uploaded_at)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('') || '<p class="note">ไม่มีไฟล์แนบ</p>';
 
@@ -671,7 +841,7 @@ function openDetail(id, keepVendors) {
         <input class="inp" data-vf="name" placeholder="ชื่อร้าน / บุคคล" value="${esc(v.name)}">
         <input class="inp" data-vf="contact" placeholder="เบอร์โทร / ที่อยู่" value="${esc(v.contact)}">
         <input class="inp" data-vf="item" placeholder="ซื้ออะไร / งานอะไร" value="${esc(v.item)}">
-        <label title="ซื้อ/ติดต่อแล้ว" style="white-space:nowrap;font-size:13px"><input type="checkbox" data-vf="done" ${v.done ? 'checked' : ''}> แล้ว</label>
+        <label title="ซื้อหรือติดต่อเรียบร้อยแล้ว" style="white-space:nowrap;font-size:13px"><input type="checkbox" data-vf="done" ${v.done ? 'checked' : ''}> เรียบร้อยแล้ว</label>
         <button class="btn sm" data-act="delVendor" data-i="${i}" aria-label="ลบแถวนี้">✕</button>
       </div>`).join('')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="addVendor">+ เพิ่มร้าน / บุคคล</button></div>
@@ -719,6 +889,7 @@ function openDetail(id, keepVendors) {
     ${!isStaff() ? `<p class="note" style="margin-top:16px">คุณดูได้อย่างเดียว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการแก้ไข</p>` : ''}
     <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
   </div>`);
+  if ($('#e_items')) initLines($('#e_items'));
   const af = $('#addFiles'); if (af) af.onchange = () => adminAddFiles(r.id, [...af.files]);
 }
 function readVendorInputs() {
@@ -762,7 +933,8 @@ function exportExcel() {
   const bk = iso => iso ? new Date(iso).toLocaleString('th-TH', { timeZone: TZ }) : '';
   const rows = list.map(r => {
     const o = {
-      'เลขที่': pr(r.id), 'ประเภท': r.req_type, 'เรื่อง': r.title, 'รายละเอียด': r.detail || '', 'สาขา': r.branch || '',
+      'เลขที่': pr(r.id), 'ชื่องาน': r.title, 'แผนก': r.branch || '',
+      ...Object.fromEntries(CONFIG.ITEM_GROUPS.map(([k, l]) => ['รายการ' + l, itemsOf(r)[k].map((x, i) => `${i + 1}. ${x}`).join('\n')])),
       'ผู้สั่ง': r.requester_name, 'วันเวลาที่แนบ': bk(r.created_at), 'วันที่ต้องการใช้': fmtD(r.needed_date),
       'สถานะ': STATUS[r.status],
       'ร้าน / บุคคล': (r.vendors || []).filter(v => v.name).map(v => `${v.name}${v.item ? ' (' + v.item + ')' : ''}${v.contact ? ' ' + v.contact : ''}${v.done ? ' ✓' : ''}`).join('\n'),
@@ -778,10 +950,10 @@ function exportExcel() {
     return o;
   });
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['เรื่อง', 'รายละเอียด', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์', 'ประวัติการแก้ไข'].includes(k) ? 36 : 18 }));
+  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['ชื่องาน', 'รายการจัดซื้อ', 'รายการโมริริน', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์', 'ประวัติการแก้ไข'].includes(k) ? 36 : 18 }));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, inTrash ? 'ถังขยะ' : 'รายการจัดซื้อ');
-  XLSX.writeFile(wb, `${inTrash ? 'ถังขยะจัดซื้อ' : 'รายการจัดซื้อ'}_${todayYMD()}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, inTrash ? 'ถังขยะ' : 'ใบงาน');
+  XLSX.writeFile(wb, `${inTrash ? 'ถังขยะ_ระบบรับใบงาน_จัดซื้อ' : 'ระบบรับใบงาน_จัดซื้อ'}_${todayYMD()}.xlsx`);
 }
 
 /* ======================= modal ======================= */
@@ -790,12 +962,15 @@ function closeModal() { $('#modal').classList.add('hidden'); document.body.style
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeModal();
-  if (e.key === 'Enter' && e.target.matches('.ticket')) e.target.click();
+  if (e.key === 'Enter' && e.target.matches('.ticket, .trow')) e.target.click();
 });
 
 /* ======================= ปุ่มทั้งหมด ======================= */
 const now = () => new Date().toISOString();
 const A = {
+  lineAdd: el => { const box = el.closest('.lines').querySelector('.lrows'); box.insertAdjacentHTML('beforeend', lineRow('')); renumber(box); box.lastElementChild.querySelector('input').focus(); },
+  lineDel: el => { const row = el.closest('.line'), box = row.parentElement; if (box.children.length > 1) row.remove(); else row.querySelector('input').value = ''; renumber(box); },
+  copySummary: async () => { await copyText(summaryText()); toast('คัดลอกสรุปแล้ว วางในไลน์กลุ่มได้เลย'); },
   sound: () => {
     const on = !soundOn();
     try { localStorage.setItem('pr_sound', on ? 'on' : 'off'); } catch {}
@@ -845,9 +1020,11 @@ const A = {
   reopen: async (el, id) => { if (await patch(id, { status: 'pending', completed_by: null, completed_at: null }, 'ย้อนกลับเป็นรอดำเนินการแล้ว')) openDetail(id); },
   adminEdit: () => { S.adminEdit = !S.adminEdit; openDetail(S.modalId, true); },
   adminSave: async (el, id) => {
-    const t = $('#e_title').value.trim(); if (!t) return toast('ใส่เรื่องก่อนบันทึก', 'err');
+    const t = $('#e_title').value.trim(); if (!t) return toast('ใส่ชื่องานก่อนบันทึก', 'err');
+    const items = readLines($('#e_items'));
+    if (!Object.values(items).some(a => a.length)) return toast('ต้องมีรายการอย่างน้อย 1 บรรทัด', 'err');
     S.adminEdit = false;
-    if (await patch(id, { req_type: $('#e_t').value, branch: $('#e_b').value, title: t, detail: $('#e_d').value.trim(), needed_date: $('#e_need').value }, 'บันทึกการแก้ไขแล้ว')) openDetail(id);
+    if (await patch(id, { branch: $('#e_b').value.trim(), title: t, items, needed_date: $('#e_need').value }, 'บันทึกการแก้ไขแล้ว')) openDetail(id);
   },
   trash: async (el, id) => { if (!confirm(`ย้าย ${pr(id)} ลงถังขยะ? กู้คืนได้ภายหลัง`)) return; if (await patch(id, { deleted_at: now(), deleted_by: S.me.full_name }, 'ย้ายลงถังขยะแล้ว')) closeModal(); },
   restore: async (el, id) => { if (await patch(id, { deleted_at: null, deleted_by: null, restored_at: now() }, 'กู้คืนแล้ว')) closeModal(); },
