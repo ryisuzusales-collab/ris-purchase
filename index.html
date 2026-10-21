@@ -204,10 +204,15 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 }
 .lines{margin:6px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .lines .lh{margin:0 0 8px;font-size:15px}
-.line{display:grid;grid-template-columns:28px 1fr auto;gap:6px;align-items:center;margin-bottom:6px}
+.line{display:grid;grid-template-columns:28px 1fr 160px auto;gap:6px;align-items:center;margin-bottom:6px}
+.lhead{display:grid;grid-template-columns:28px 1fr 160px 38px;gap:6px;font-size:12px;color:var(--muted);margin-bottom:4px}
+.ilist .note{white-space:nowrap}
+@media (max-width:640px){.line{grid-template-columns:24px 1fr auto}.line .ld{grid-column:2}.lhead{display:none}}
 .line .ln{color:var(--muted);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
 .ilist{margin:0;padding-left:22px}
 .ilist li{padding:2px 0}
+.rtdot{width:10px;height:10px;border-radius:50%;flex:0 0 10px;background:#999}
+.rtdot.ok{background:#3BC07A}.rtdot.bad{background:#FF5C6F}.rtdot.wait{background:#F2B544}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -288,11 +293,32 @@ function updateSoundBar() {
   const bar = $('#soundbar'); if (bar) bar.classList.toggle('hidden', !(soundOn() && (!audioCtx || audioCtx.state !== 'running')));
 }
 ['click', 'touchstart', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (soundOn() && (!audioCtx || audioCtx.state !== 'running')) ensureAudio(); }, { passive: true }));
+// แจ้งเตือนระบบ (มุมจอ/แถบแจ้งเตือนมือถือ) ผ่าน service worker ใช้ได้ทั้งคอมและ Android
+async function sysNotify(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+  const opts = { body, tag: 'pr-' + Date.now(), requireInteraction: true, renotify: true, vibrate: [200, 100, 200, 100, 300] };
+  try { const reg = await navigator.serviceWorker?.getRegistration(); if (reg) { await reg.showNotification(title, opts); return true; } } catch {}
+  try { new Notification(title, opts); return true; } catch { return false; }
+}
 function notify(title, body) {
-  toast(title + '\n' + body, 'new'); beep();
-  if ('Notification' in window && Notification.permission === 'granted') {
-    try { new Notification(title, { body, tag: 'pr-' + Date.now() }); } catch {}
-  }
+  toast(title + '\n' + body, 'new'); beep(); sysNotify(title, body);
+}
+function rtSet(state) {
+  S.rt = state;
+  const d = $('#rtDot'); if (!d) return;
+  d.className = 'rtdot ' + state;
+  d.title = state === 'ok' ? 'เชื่อมต่อเรียลไทม์อยู่' : state === 'wait' ? 'กำลังเชื่อมต่อ...' : 'หลุดการเชื่อมต่อ กำลังต่อใหม่';
+}
+async function testNotify() {
+  const problems = [];
+  if (!soundOn()) problems.push('ปิดเสียงไว้ (กดปุ่ม 🔇 ให้เป็น 🔊)');
+  if (!audioCtx || audioCtx.state !== 'running') problems.push('เบราว์เซอร์ยังบล็อกเสียง (แตะแถบสีเหลือง)');
+  if (!('Notification' in window)) problems.push('เบราว์เซอร์นี้ไม่รองรับแจ้งเตือนระบบ');
+  else if (Notification.permission === 'denied') problems.push('แจ้งเตือนระบบถูกบล็อก (เปิดในตั้งค่าเว็บไซต์ของเบราว์เซอร์)');
+  else if (Notification.permission === 'default') problems.push('ยังไม่ได้กดอนุญาตแจ้งเตือนระบบ');
+  if (S.rt !== 'ok') problems.push('ไม่ได้เชื่อมต่อเรียลไทม์ (จุดสีที่หัวแอปไม่เขียว)');
+  toast(problems.length ? 'พบปัญหา: ' + problems.join(', ') : 'ทุกอย่างพร้อม จะเตือนทดสอบใน 5 วินาที ลองสลับไปหน้าต่างอื่นดูได้', problems.length ? 'err' : '');
+  setTimeout(() => notify('ทดสอบแจ้งเตือน', 'ถ้าได้ยินเสียงและเห็นข้อความนี้ แปลว่าเครื่องนี้พร้อมรับงานแล้ว'), 5000);
 }
 
 /* ======================= สถานะแอป ======================= */
@@ -305,22 +331,48 @@ const S = {
 const isStaff = () => S.me && (S.me.role === 'staff' || S.me.role === 'admin');
 const isAdmin = () => S.me && S.me.role === 'admin';
 const live = () => S.rows.filter(r => !r.deleted_at);
-const itemsOf = r => { const it = r.items || {}; const o = {}; CONFIG.ITEM_GROUPS.forEach(([k]) => o[k] = (it[k] || []).filter(Boolean)); return o; };
+const itemsOf = r => {
+  const it = r.items || {}, o = {};
+  CONFIG.ITEM_GROUPS.forEach(([k]) => o[k] = (it[k] || [])
+    .map(x => typeof x === 'string' ? { text: x, date: r.needed_date } : { text: x.text || '', date: x.date || r.needed_date })
+    .filter(x => x.text));
+  return o;
+};
+const itemDates = r => [...new Set(Object.values(itemsOf(r)).flat().map(x => x.date).filter(Boolean))].sort();
+const itemLabel = x => `${x.text} (${fmtD(x.date)})`;
 function linesBlock(key, label, values) {
-  const vals = values && values.length ? values : [''];
+  const vals = values && values.length ? values : [{ text: '', date: '' }];
   return `<div class="lines" data-g="${key}"><h4 class="lh">${label}</h4>
+    <div class="lhead"><span></span><span>รายการ</span><span>วันที่ต้องการใช้</span><span></span></div>
     <div class="lrows">${vals.map(v => lineRow(v)).join('')}</div>
     <button type="button" class="btn sm" data-act="lineAdd">+ เพิ่มบรรทัด</button></div>`;
 }
-const lineRow = v => `<div class="line"><span class="ln"></span><input class="inp" value="${esc(v)}" maxlength="300"><button type="button" class="btn sm" data-act="lineDel" aria-label="ลบบรรทัดนี้">✕</button></div>`;
-function renumber(box) { box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; l.querySelector('input').placeholder = 'บรรทัดที่ ' + (i + 1); }); }
-function readLines(root) { const o = {}; root.querySelectorAll('.lines').forEach(b => o[b.dataset.g] = [...b.querySelectorAll('.line input')].map(i => i.value.trim()).filter(Boolean)); return o; }
+const lineRow = (v = {}) => `<div class="line"><span class="ln"></span>
+  <input class="inp lt" value="${esc(v.text || '')}" maxlength="300">
+  <input class="inp ld" type="date" value="${esc(v.date || '')}" aria-label="วันที่ต้องการใช้">
+  <button type="button" class="btn sm" data-act="lineDel" aria-label="ลบบรรทัดนี้">✕</button></div>`;
+function renumber(box) { box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; l.querySelector('.lt').placeholder = 'บรรทัดที่ ' + (i + 1); }); }
+function readLines(root) {
+  const o = {}; let missing = 0;
+  root.querySelectorAll('.lines').forEach(b => o[b.dataset.g] = [...b.querySelectorAll('.line')].map(l => {
+    const text = l.querySelector('.lt').value.trim(), date = l.querySelector('.ld').value;
+    if (text && !date) missing++;
+    return { text, date };
+  }).filter(x => x.text));
+  const all = Object.values(o).flat();
+  return { items: o, count: all.length, missing, earliest: all.map(x => x.date).filter(Boolean).sort()[0] };
+}
 function initLines(root) { root.querySelectorAll('.lines .lrows').forEach(renumber); }
+function addLineAfter(row, box) {
+  const date = row ? row.querySelector('.ld').value : '';
+  if (row) row.insertAdjacentHTML('afterend', lineRow({ date })); else box.insertAdjacentHTML('beforeend', lineRow({ date }));
+  renumber(box);
+  (row ? row.nextElementSibling : box.lastElementChild).querySelector('.lt').focus();
+}
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' || !e.target.closest('.line')) return;
   e.preventDefault();
-  const row = e.target.closest('.line'); row.insertAdjacentHTML('afterend', lineRow(''));
-  renumber(row.parentElement); row.nextElementSibling.querySelector('input').focus();
+  const row = e.target.closest('.line'); addLineAfter(row, row.parentElement);
 });
 const needsAttn = r => r.status === 'new' || r.edit_flag;
 const short = (t, n = 120) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + '…' : t; };
@@ -340,7 +392,9 @@ async function init() {
     $('#app').innerHTML = `<div class="auth"><div class="card"><h1>ยังไม่ได้เชื่อมฐานข้อมูล</h1><p>เปิดไฟล์นี้แล้วใส่ SUPABASE_URL และ SUPABASE_ANON_KEY ในส่วน CONFIG ด้านบนของสคริปต์</p></div></div>`;
     return;
   }
-  sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+  // worker: true ให้สัญญาณเรียลไทม์ทำงานต่อแม้แท็บอยู่เบื้องหลัง (เบราว์เซอร์จะชะลอ timer ของแท็บที่ไม่ได้เปิดดู)
+  sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, { realtime: { worker: true } });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   const { data } = await sb.auth.getSession();
   if (data.session) { S.user = data.session.user; await enter(); } else renderAuth('login');
 }
@@ -416,11 +470,19 @@ async function applyChange(p) {
   else if (p.eventType === 'INSERT') S.rows.push(n);
   else { const { data } = await sb.from('requests').select('*').eq('id', n.id).maybeSingle(); if (data) S.rows.push(data); }
 }
-async function resync() { await loadAll(); renderContent(); renderHeaderCounts(); }
+async function resync(announce) {
+  const before = new Set(S.rows.map(r => r.id));
+  await loadAll(); renderContent(); renderHeaderCounts();
+  // งานที่เข้ามาระหว่างเน็ตหลุดหรือเครื่องหลับ ให้เตือนย้อนหลัง
+  if (announce && isStaff()) {
+    const fresh = S.rows.filter(r => !before.has(r.id) && r.status === 'new' && r.requester_id !== S.me.id);
+    if (fresh.length) notify(`มีงานใหม่ ${fresh.length} งาน`, 'เข้ามาระหว่างที่เครื่องหลุดการเชื่อมต่อ: ' + fresh.map(r => pr(r.id)).join(', '));
+  }
+}
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) hiddenAt = Date.now();
-  else if (S.me && hiddenAt && Date.now() - hiddenAt > 5 * 60000) resync();
+  else if (S.me && hiddenAt && Date.now() - hiddenAt > 5 * 60000) resync(true);
 });
 function subscribe() {
   sb.channel('rt-requests')
@@ -447,7 +509,8 @@ function subscribe() {
       });
     }).subscribe(status => {
       // ต่อเรียลไทม์ใหม่หลังเน็ตหลุด: โหลดข้อมูลทั้งหมดหนึ่งครั้งเพื่อเก็บตกที่พลาดไป
-      if (status === 'SUBSCRIBED') { if (S.rtReady) resync(); S.rtReady = true; }
+      if (status === 'SUBSCRIBED') { rtSet('ok'); if (S.rtReady) resync(true); S.rtReady = true; }
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') rtSet('bad');
     });
   sb.channel('rt-me')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: 'id=eq.' + S.me.id }, async p => {
@@ -463,9 +526,10 @@ function renderShell() {
   if (isStaff()) tabs.push(['trash', 'ถังขยะ']);
   if (isAdmin()) tabs.push(['users', 'ผู้ใช้และสิทธิ์']);
   if (!tabs.some(t => t[0] === S.view)) S.view = 'list';
-  const canNotif = 'Notification' in window && Notification.permission === 'default' && isStaff();
+  const canNotif = 'Notification' in window && Notification.permission === 'default';
   $('#app').innerHTML = `
   <header class="top"><div class="wrap">
+    <span id="rtDot" class="rtdot wait" title="กำลังเชื่อมต่อ..."></span>
     <div class="brand">ระบบรับใบงาน_จัดซื้อ</div>
     <div class="who"><b>${esc(S.me.full_name || S.me.username)}</b>${ROLE[S.me.role]}${S.me.branch ? ' / ' + esc(S.me.branch) : ''}</div>
     ${canNotif ? `<button class="iconbtn" data-act="notif" title="เปิดการแจ้งเตือนบนเครื่องนี้">เปิดแจ้งเตือน</button>` : ''}
@@ -478,7 +542,7 @@ function renderShell() {
     <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.view === k ? 'on' : ''}" data-act="tab" data-v="${k}">${l}${k === 'trash' ? `<span class="c" id="trashN">${trash().length}</span>` : ''}</button>`).join('')}</nav>
     <div id="content"></div>
   </main>`;
-  renderContent(); renderHeaderCounts(); updateSoundBar();
+  renderContent(); renderHeaderCounts(); updateSoundBar(); rtSet(S.rt || 'wait');
 }
 
 function renderHeaderCounts() {
@@ -498,7 +562,7 @@ function filtered(base) {
     }
     if (S.type && r.req_type !== S.type) return false;
     if (q) {
-      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, ...Object.values(itemsOf(r)).flat(), ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
+      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, ...Object.values(itemsOf(r)).flat().map(x => x.text), ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -563,7 +627,7 @@ function ticket(r) {
       <div class="ttl">${esc(r.title)}</div>
       <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b></span>
         <span>แนบเมื่อ <b>${fmtDT(r.created_at)}</b></span>
-        <span>ต้องการ <b>${fmtD(r.needed_date)}</b></span>
+        <span>ต้องการ <b>${(() => { const d = itemDates(r); return d.length > 1 ? fmtD(d[0]) + ' ถึง ' + fmtD(d[d.length - 1]) : fmtD(r.needed_date); })()}</b></span>
         ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const n = itemsOf(r)[k].length; return n ? `<span>${l} <b>${n}</b> รายการ</span>` : ''; }).join('')}
         <span>ไฟล์ <b>${(r.files || []).length}</b></span></div>
       ${vend.length ? `<div class="vend">ร้าน/บุคคล: ${vend.map(v => (v.done ? '✓ ' : '') + esc(v.name)).join(', ')}</div>` : ''}
@@ -646,6 +710,7 @@ function renderToday() {
         <ul>${noVendor.map(r => `<li data-act="open" data-id="${r.id}">${pr(r.id)} ${esc(r.title)} <span class="note">(${dueText(r)})</span></li>`).join('')}</ul></div>` : ''}
     </section>` : '';
   return `<div class="today-h"><h2>${dateTxt}</h2>
+      <button class="btn" data-act="testNotify">ทดสอบแจ้งเตือน</button>
       <button class="btn" data-act="copySummary">คัดลอกสรุปส่ง LINE</button>
       <button class="btn primary" data-act="create">+ สร้างคำขอ</button></div>
     <div class="stats">
@@ -691,7 +756,7 @@ function renderCal() {
   const m = S.calMonth, y = m.getFullYear(), mo = m.getMonth();
   const start = new Date(y, mo, 1).getDay(), days = new Date(y, mo + 1, 0).getDate();
   const by = {};
-  sortUrgent(filtered(live())).forEach(r => (by[r.needed_date] ||= []).push(r));
+  sortUrgent(filtered(live())).forEach(r => { const ds = itemDates(r); (ds.length ? ds : [r.needed_date]).forEach(d => (by[d] ||= []).push(r)); });
   const today = todayYMD();
   let cells = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map(d => `<div class="dow">${d}</div>`).join('');
   for (let i = 0; i < start; i++) cells += `<div class="cell empty"></div>`;
@@ -765,7 +830,6 @@ function openCreate() {
       <label class="f"><span>แผนก</span><input class="inp" name="b" required maxlength="100"></label>
     </div>
     ${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l)).join('')}
-    <label class="f"><span>วันที่ต้องการใช้</span><input class="inp" type="date" name="need" required min="${min}" value=""></label>
     <label class="f"><span>แนบไฟล์เอกสาร (ใบขอซื้อ รูปภาพ ใบเสนอราคา ฯลฯ)</span><input class="inp" type="file" id="fpick" multiple></label>
     <div id="flist"></div>
     <div class="foot"><button type="button" class="btn" data-act="close">ยกเลิก</button><button class="btn primary" id="cfBtn">ส่งคำขอ</button></div>
@@ -799,15 +863,17 @@ async function uploadFiles(files) {
 async function submitCreate(e) {
   e.preventDefault();
   const f = e.target, btn = $('#cfBtn');
-  const items = readLines(f);
-  if (!Object.values(items).some(a => a.length)) return toast('กรอกรายการจัดซื้อหรือโมริรินอย่างน้อย 1 บรรทัด', 'err');
+  const { items, count, missing, earliest } = readLines(f);
+  if (!count) return toast('กรอกรายการจัดซื้อหรือโมริรินอย่างน้อย 1 บรรทัด', 'err');
+  if (missing) return toast(`ใส่วันที่ต้องการใช้ให้ครบทุกบรรทัด (ขาด ${missing} บรรทัด)`, 'err');
+  if (earliest < todayYMD()) return toast('วันที่ต้องการใช้ต้องไม่ใช่วันที่ผ่านมาแล้ว', 'err');
   btn.disabled = true; btn.textContent = 'กำลังส่ง...';
   let files = [];
   try {
     files = await uploadFiles(S.pendingFiles);
     const { error } = await sb.from('requests').insert({
       req_type: 'ใบงาน', branch: f.b.value.trim(), title: f.title.value.trim(), items,
-      needed_date: f.need.value, files, requester_id: S.me.id, requester_name: S.me.full_name,
+      needed_date: earliest, files, requester_id: S.me.id, requester_name: S.me.full_name,
     });
     if (error) throw new Error(error.message);
     closeModal(); toast('ส่งคำขอแล้ว เจ้าหน้าที่จัดซื้อจะได้รับแจ้งเตือนทันที');
@@ -834,19 +900,18 @@ function openDetail(id, keepVendors) {
       <label class="f"><span>แผนก</span><input class="inp" id="e_b" value="${esc(r.branch)}"></label>
     </div>
     <div id="e_items">${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l, itemsOf(r)[k])).join('')}</div>
-    <label class="f"><span>วันที่ต้องการใช้</span><input class="inp" type="date" id="e_need" value="${r.needed_date}"></label>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="adminEdit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="adminSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`
   : `
     <div class="grid2">
       <div><span>แผนก</span>${esc(r.branch || '-')}</div>
       <div><span>ผู้สั่ง</span>${esc(r.requester_name)}</div>
       <div><span>วันเวลาที่แนบ</span>${fmtDT(r.created_at)}</div>
-      <div><span>วันที่ต้องการใช้</span><b>${fmtD(r.needed_date)}</b>${dueTxt}</div>
+      <div><span>วันที่ต้องการใช้ (เร็วสุด)</span><b>${fmtD(r.needed_date)}</b>${dueTxt}</div>
       <div><span>สถานะ</span><span class="badge s-${r.deleted_at ? 'trash' : r.status}" style="margin:0">${r.deleted_at ? 'อยู่ในถังขยะ' : STATUS[r.status]}</span></div>
       <div><span>รับทราบโดย</span>${r.acknowledged_by ? esc(r.acknowledged_by) + '<br><small>' + fmtDT(r.acknowledged_at) + '</small>' : '-'}</div>
       <div><span>เรียบร้อยโดย</span>${r.completed_by ? esc(r.completed_by) + '<br><small>' + fmtDT(r.completed_at) + '</small>' : '-'}</div>
     </div>
-    ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const a = itemsOf(r)[k]; return a.length ? `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>` : ''; }).join('')}
+    ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const a = itemsOf(r)[k]; return a.length ? `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map(x => { const d = daysUntil(x.date); const due = r.status === 'done' ? '' : d < 0 ? `, เลย ${-d} วัน` : d === 0 ? ', วันนี้' : `, อีก ${d} วัน`; return `<li>${esc(x.text)} <span class="note">ต้องการ ${fmtD(x.date)}${due}</span></li>`; }).join('')}</ol></div>` : ''; }).join('')}
     ${r.detail ? `<div class="sec"><h4>รายละเอียด</h4><div class="box">${esc(r.detail)}</div></div>` : ''}`;
 
   const files = (r.files || []).map(f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}, แนบโดย ${esc(f.uploaded_by || '-')} เมื่อ ${fmtDT(f.uploaded_at)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('') || '<p class="note">ไม่มีไฟล์แนบ</p>';
@@ -953,8 +1018,8 @@ function exportExcel() {
   const rows = list.map(r => {
     const o = {
       'เลขที่': pr(r.id), 'ชื่องาน': r.title, 'แผนก': r.branch || '',
-      ...Object.fromEntries(CONFIG.ITEM_GROUPS.map(([k, l]) => ['รายการ' + l, itemsOf(r)[k].map((x, i) => `${i + 1}. ${x}`).join('\n')])),
-      'ผู้สั่ง': r.requester_name, 'วันเวลาที่แนบ': bk(r.created_at), 'วันที่ต้องการใช้': fmtD(r.needed_date),
+      ...Object.fromEntries(CONFIG.ITEM_GROUPS.map(([k, l]) => ['รายการ' + l, itemsOf(r)[k].map((x, i) => `${i + 1}. ${itemLabel(x)}`).join('\n')])),
+      'ผู้สั่ง': r.requester_name, 'วันเวลาที่แนบ': bk(r.created_at), 'วันที่ต้องการใช้ (เร็วสุด)': fmtD(r.needed_date),
       'สถานะ': STATUS[r.status],
       'ร้าน / บุคคล': (r.vendors || []).filter(v => v.name).map(v => `${v.name}${v.item ? ' (' + v.item + ')' : ''}${v.contact ? ' ' + v.contact : ''}${v.done ? ' ✓' : ''}`).join('\n'),
       'หมายเหตุเจ้าหน้าที่': r.staff_note || '',
@@ -987,8 +1052,9 @@ document.addEventListener('keydown', e => {
 /* ======================= ปุ่มทั้งหมด ======================= */
 const now = () => new Date().toISOString();
 const A = {
-  lineAdd: el => { const box = el.closest('.lines').querySelector('.lrows'); box.insertAdjacentHTML('beforeend', lineRow('')); renumber(box); box.lastElementChild.querySelector('input').focus(); },
-  lineDel: el => { const row = el.closest('.line'), box = row.parentElement; if (box.children.length > 1) row.remove(); else row.querySelector('input').value = ''; renumber(box); },
+  lineAdd: el => { const box = el.closest('.lines').querySelector('.lrows'); addLineAfter(box.lastElementChild, box); },
+  lineDel: el => { const row = el.closest('.line'), box = row.parentElement; if (box.children.length > 1) row.remove(); else { row.querySelector('.lt').value = ''; row.querySelector('.ld').value = ''; } renumber(box); },
+  testNotify: () => { ensureAudio(); testNotify(); },
   copySummary: async () => { await copyText(summaryText()); toast('คัดลอกสรุปแล้ว วางในไลน์กลุ่มได้เลย'); },
   sound: () => {
     const on = !soundOn();
@@ -999,7 +1065,7 @@ const A = {
   unlock: () => { ensureAudio(); beep(true); toast('เปิดเสียงแจ้งเตือนแล้ว'); },
   authmode: el => renderAuth(el.dataset.v),
   logout: async () => { await sb.auth.signOut(); location.reload(); },
-  notif: async () => { await Notification.requestPermission(); renderShell(); },
+  notif: async () => { ensureAudio(); const p = await Notification.requestPermission(); renderShell(); if (p === 'granted') sysNotify('เปิดแจ้งเตือนแล้ว', 'เครื่องนี้จะได้รับแจ้งเตือนเมื่อมีงานเข้า'); },
   gonew: () => { S.view = 'list'; S.filter = 'attn'; renderShell(); },
   tab: el => { S.view = el.dataset.v; renderShell(); },
   filter: el => { S.filter = el.dataset.v; renderContent(); },
@@ -1040,10 +1106,11 @@ const A = {
   adminEdit: () => { S.adminEdit = !S.adminEdit; openDetail(S.modalId, true); },
   adminSave: async (el, id) => {
     const t = $('#e_title').value.trim(); if (!t) return toast('ใส่ชื่องานก่อนบันทึก', 'err');
-    const items = readLines($('#e_items'));
-    if (!Object.values(items).some(a => a.length)) return toast('ต้องมีรายการอย่างน้อย 1 บรรทัด', 'err');
+    const { items, count, missing, earliest } = readLines($('#e_items'));
+    if (!count) return toast('ต้องมีรายการอย่างน้อย 1 บรรทัด', 'err');
+    if (missing) return toast('ใส่วันที่ต้องการใช้ให้ครบทุกบรรทัด', 'err');
     S.adminEdit = false;
-    if (await patch(id, { branch: $('#e_b').value.trim(), title: t, items, needed_date: $('#e_need').value }, 'บันทึกการแก้ไขแล้ว')) openDetail(id);
+    if (await patch(id, { branch: $('#e_b').value.trim(), title: t, items, needed_date: earliest }, 'บันทึกการแก้ไขแล้ว')) openDetail(id);
   },
   trash: async (el, id) => { if (!confirm(`ย้าย ${pr(id)} ลงถังขยะ? กู้คืนได้ภายหลัง`)) return; if (await patch(id, { deleted_at: now(), deleted_by: S.me.full_name }, 'ย้ายลงถังขยะแล้ว')) closeModal(); },
   restore: async (el, id) => { if (await patch(id, { deleted_at: null, deleted_by: null, restored_at: now() }, 'กู้คืนแล้ว')) closeModal(); },
