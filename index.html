@@ -207,6 +207,10 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .line{display:grid;grid-template-columns:28px 1fr 160px auto;gap:6px;align-items:center;margin-bottom:6px}
 .lhead{display:grid;grid-template-columns:28px 1fr 160px 38px;gap:6px;font-size:12px;color:var(--muted);margin-bottom:4px}
 .ilist .note{white-space:nowrap}
+.line.locked .lro{padding:8px 10px;background:var(--paper);border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lock,.okb{font-size:12px;color:var(--green);font-weight:600;white-space:nowrap}
+.bchk{font-size:12.5px;white-space:nowrap;margin-left:6px;color:var(--green);cursor:pointer}
+.ilist li.bought>.it{text-decoration:line-through;color:var(--muted)}
 @media (max-width:640px){.line{grid-template-columns:24px 1fr auto}.line .ld{grid-column:2}.lhead{display:none}}
 .line .ln{color:var(--muted);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
 .ilist{margin:0;padding-left:22px}
@@ -326,7 +330,7 @@ let sb;
 const S = {
   user: null, me: null, rows: [], profiles: [],
   view: 'list', filter: 'open', q: '', type: '', calMonth: null,
-  pendingFiles: [], modalId: null, editVendors: null, adminEdit: false,
+  pendingFiles: [], modalId: null, editVendors: null, editMode: null,
 };
 const isStaff = () => S.me && (S.me.role === 'staff' || S.me.role === 'admin');
 const isAdmin = () => S.me && S.me.role === 'admin';
@@ -334,37 +338,47 @@ const live = () => S.rows.filter(r => !r.deleted_at);
 const itemsOf = r => {
   const it = r.items || {}, o = {};
   CONFIG.ITEM_GROUPS.forEach(([k]) => o[k] = (it[k] || [])
-    .map(x => typeof x === 'string' ? { text: x, date: r.needed_date } : { text: x.text || '', date: x.date || r.needed_date })
+    .map(x => typeof x === 'string' ? { text: x, date: r.needed_date } : { ...x, text: x.text || '', date: x.date || r.needed_date })
     .filter(x => x.text));
   return o;
 };
 const itemDates = r => [...new Set(Object.values(itemsOf(r)).flat().map(x => x.date).filter(Boolean))].sort();
-const itemLabel = x => `${x.text} (${fmtD(x.date)})`;
-function linesBlock(key, label, values) {
+const itemLabel = x => `${x.text} (${fmtD(x.date)})${x.bought ? ' ✓ซื้อแล้ว' : ''}`;
+const itemProgress = r => { const a = Object.values(itemsOf(r)).flat(); return [a.filter(x => x.bought).length, a.length]; };
+function linesBlock(key, label, values, lockBought) {
   const vals = values && values.length ? values : [{ text: '', date: '' }];
   return `<div class="lines" data-g="${key}"><h4 class="lh">${label}</h4>
     <div class="lhead"><span></span><span>รายการ</span><span>วันที่ต้องการใช้</span><span></span></div>
-    <div class="lrows">${vals.map(v => lineRow(v)).join('')}</div>
+    <div class="lrows">${vals.map(v => lineRow(v, lockBought && v.bought)).join('')}</div>
     <button type="button" class="btn sm" data-act="lineAdd">+ เพิ่มบรรทัด</button></div>`;
 }
-const lineRow = (v = {}) => `<div class="line"><span class="ln"></span>
+const lineRow = (v = {}, locked) => {
+  if (locked) return `<div class="line locked" data-item="${esc(JSON.stringify(v))}"><span class="ln"></span>
+    <span class="lro">${esc(v.text)}</span><span class="lro">${fmtD(v.date)}</span><span class="lock" title="จัดซื้อซื้อแล้ว แก้ไขหรือลบไม่ได้">🔒 ซื้อแล้ว</span></div>`;
+  const extra = {}; ['bought', 'bought_by', 'bought_at'].forEach(k => { if (v[k] !== undefined) extra[k] = v[k]; });
+  return `<div class="line" data-extra="${esc(JSON.stringify(extra))}"><span class="ln"></span>
   <input class="inp lt" value="${esc(v.text || '')}" maxlength="300">
   <input class="inp ld" type="date" value="${esc(v.date || '')}" aria-label="วันที่ต้องการใช้">
   <button type="button" class="btn sm" data-act="lineDel" aria-label="ลบบรรทัดนี้">✕</button></div>`;
-function renumber(box) { box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; l.querySelector('.lt').placeholder = 'บรรทัดที่ ' + (i + 1); }); }
+};
+function renumber(box) { box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; const t = l.querySelector('.lt'); if (t) t.placeholder = 'บรรทัดที่ ' + (i + 1); }); }
 function readLines(root) {
   const o = {}; let missing = 0;
-  root.querySelectorAll('.lines').forEach(b => o[b.dataset.g] = [...b.querySelectorAll('.line')].map(l => {
-    const text = l.querySelector('.lt').value.trim(), date = l.querySelector('.ld').value;
-    if (text && !date) missing++;
-    return { text, date };
-  }).filter(x => x.text));
+  root.querySelectorAll('.lines').forEach(b => {
+    const arr = [...b.querySelectorAll('.line')].map(l => {
+      if (l.classList.contains('locked')) return JSON.parse(l.dataset.item);
+      const text = l.querySelector('.lt').value.trim(), date = l.querySelector('.ld').value;
+      if (text && !date) missing++;
+      return { text, date, ...JSON.parse(l.dataset.extra || '{}') };
+    }).filter(x => x.text);
+    if (arr.length) o[b.dataset.g] = arr;
+  });
   const all = Object.values(o).flat();
-  return { items: o, count: all.length, missing, earliest: all.map(x => x.date).filter(Boolean).sort()[0] };
+  return { items: o, count: all.length, missing, earliest: all.filter(x => !x.bought).map(x => x.date).filter(Boolean).sort()[0] || all.map(x => x.date).filter(Boolean).sort()[0] };
 }
 function initLines(root) { root.querySelectorAll('.lines .lrows').forEach(renumber); }
 function addLineAfter(row, box) {
-  const date = row ? row.querySelector('.ld').value : '';
+  const date = row?.querySelector('.ld')?.value || '';
   if (row) row.insertAdjacentHTML('afterend', lineRow({ date })); else box.insertAdjacentHTML('beforeend', lineRow({ date }));
   renumber(box);
   (row ? row.nextElementSibling : box.lastElementChild).querySelector('.lt').focus();
@@ -496,7 +510,7 @@ function subscribe() {
         const pl = (prev?.edit_log || []).length, nl = (n.edit_log || []).length;
         const last = (n.edit_log || [])[nl - 1];
         if (prev && nl > pl && last?.kind === 'edit' && last.by !== S.me.full_name && (isStaff() || n.requester_id === S.me.id)) {
-          notify('มีการแก้ไข ' + pr(n.id), `${n.title}\nแก้โดย ${last.by}: ${(last.changes || []).map(c => c.field).join(', ')}`);
+          notify('มีการแก้ไข ' + pr(n.id), `${n.title}\nแก้โดย ${last.by}${last.role ? ' (' + last.role + ')' : ''}: ${(last.changes || []).map(c => c.field).join(', ')}${last.reason ? '\nเหตุผล: ' + last.reason : ''}`);
         }
       }
       if (p.eventType === 'UPDATE' && n.requester_id === S.me.id && !isStaff()) {
@@ -629,6 +643,7 @@ function ticket(r) {
         <span>แนบเมื่อ <b>${fmtDT(r.created_at)}</b></span>
         <span>ต้องการ <b>${(() => { const d = itemDates(r); return d.length > 1 ? fmtD(d[0]) + ' ถึง ' + fmtD(d[d.length - 1]) : fmtD(r.needed_date); })()}</b></span>
         ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const n = itemsOf(r)[k].length; return n ? `<span>${l} <b>${n}</b> รายการ</span>` : ''; }).join('')}
+        ${(() => { const [b, n] = itemProgress(r); return b ? `<span>ซื้อแล้ว <b>${b}/${n}</b></span>` : ''; })()}
         <span>ไฟล์ <b>${(r.files || []).length}</b></span></div>
       ${vend.length ? `<div class="vend">ร้าน/บุคคล: ${vend.map(v => (v.done ? '✓ ' : '') + esc(v.name)).join(', ')}</div>` : ''}
     </div></div>`;
@@ -690,7 +705,7 @@ function trow(r) {
   const [vs, warn] = vendStat(r);
   return `<div class="trow" role="button" tabindex="0" data-act="open" data-id="${r.id}">
     <span class="tdue">${dueText(r)}</span><span class="prno">${pr(r.id)}</span>
-    <span class="tt"><b>${esc(r.title)}</b><small>${esc(r.requester_name)}${r.branch ? ', แผนก' + esc(r.branch) : ''}, ต้องการ ${fmtD(r.needed_date)}</small></span>
+    <span class="tt"><b>${esc(r.title)}</b><small>${esc(r.requester_name)}${r.branch ? ', แผนก' + esc(r.branch) : ''}, ต้องการ ${fmtD(r.needed_date)}${(() => { const [b, n] = itemProgress(r); return b ? `, ซื้อแล้ว ${b}/${n}` : ''; })()}</small></span>
     <span class="vs ${warn ? 'warn' : ''}">${vs}</span></div>`;
 }
 function renderToday() {
@@ -892,15 +907,10 @@ function openDetail(id, keepVendors) {
   const d = daysUntil(r.needed_date);
   const dueTxt = r.status === 'done' ? '' : d < 0 ? ` (เลยกำหนด ${-d} วัน)` : d === 0 ? ' (วันนี้)' : ` (อีก ${d} วัน)`;
   const staffCan = isStaff() && !r.deleted_at;
-  const ed = isAdmin() && S.adminEdit && !r.deleted_at;
+  const canOwner = r.requester_id === S.me.id && !r.deleted_at && r.status !== 'done' && !isAdmin();
+  const mode = !r.deleted_at && (S.editMode === 'admin' && isAdmin() || S.editMode === 'owner' && canOwner) ? S.editMode : null;
 
-  const info = ed ? `
-    <div class="grid2">
-      <label class="f"><span>ชื่องาน</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
-      <label class="f"><span>แผนก</span><input class="inp" id="e_b" value="${esc(r.branch)}"></label>
-    </div>
-    <div id="e_items">${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l, itemsOf(r)[k])).join('')}</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="adminEdit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="adminSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`
+  const info = mode ? editFormHtml(r, mode)
   : `
     <div class="grid2">
       <div><span>แผนก</span>${esc(r.branch || '-')}</div>
@@ -911,7 +921,14 @@ function openDetail(id, keepVendors) {
       <div><span>รับทราบโดย</span>${r.acknowledged_by ? esc(r.acknowledged_by) + '<br><small>' + fmtDT(r.acknowledged_at) + '</small>' : '-'}</div>
       <div><span>เรียบร้อยโดย</span>${r.completed_by ? esc(r.completed_by) + '<br><small>' + fmtDT(r.completed_at) + '</small>' : '-'}</div>
     </div>
-    ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const a = itemsOf(r)[k]; return a.length ? `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map(x => { const d = daysUntil(x.date); const due = r.status === 'done' ? '' : d < 0 ? `, เลย ${-d} วัน` : d === 0 ? ', วันนี้' : `, อีก ${d} วัน`; return `<li>${esc(x.text)} <span class="note">ต้องการ ${fmtD(x.date)}${due}</span></li>`; }).join('')}</ol></div>` : ''; }).join('')}
+    ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const a = itemsOf(r)[k]; return a.length ? `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map((x, i) => {
+      const d = daysUntil(x.date);
+      const due = r.status === 'done' || x.bought ? '' : d < 0 ? `, เลย ${-d} วัน` : d === 0 ? ', วันนี้' : `, อีก ${d} วัน`;
+      const mark = staffCan && r.status === 'pending'
+        ? `<label class="bchk"><input type="checkbox" data-act="toggleBought" data-id="${r.id}" data-g="${k}" data-i="${i}" ${x.bought ? 'checked' : ''}> ซื้อแล้ว</label>`
+        : x.bought ? '<span class="okb">✓ ซื้อแล้ว</span>' : '';
+      return `<li class="${x.bought ? 'bought' : ''}"><span class="it">${esc(x.text)}</span> <span class="note">ต้องการ ${fmtD(x.date)}${due}</span> ${mark}</li>`;
+    }).join('')}</ol></div>` : ''; }).join('')}
     ${r.detail ? `<div class="sec"><h4>รายละเอียด</h4><div class="box">${esc(r.detail)}</div></div>` : ''}`;
 
   const files = (r.files || []).map(f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}, แนบโดย ${esc(f.uploaded_by || '-')} เมื่อ ${fmtDT(f.uploaded_at)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('') || '<p class="note">ไม่มีไฟล์แนบ</p>';
@@ -940,13 +957,14 @@ function openDetail(id, keepVendors) {
   const log = r.edit_log || [];
   const lastEdit = [...log].reverse().find(e => e.kind === 'edit');
   const alertHtml = r.edit_flag && !r.deleted_at ? `<div class="alert"><b>คำขอนี้ถูกแก้ไขหลังจากรับทราบแล้ว</b>
-      แก้โดย ${esc(lastEdit?.by)} เมื่อ ${fmtDT(lastEdit?.at)} ตรวจรายการที่เปลี่ยนก่อนดำเนินการต่อ
+      แก้โดย ${esc(lastEdit?.by)}${lastEdit?.role ? ' (' + esc(lastEdit.role) + ')' : ''} เมื่อ ${fmtDT(lastEdit?.at)} ตรวจรายการที่เปลี่ยนก่อนดำเนินการต่อ
+      ${lastEdit?.reason ? `<div style="margin-top:4px">เหตุผล: <b style="display:inline">${esc(lastEdit.reason)}</b></div>` : ''}
       <ul>${(lastEdit?.changes || []).map(c => `<li class="chg">${changeLine(c)}</li>`).join('')}</ul>
       ${staffCan ? `<button class="btn primary" data-act="ackEdit" data-id="${r.id}">รับทราบการแก้ไข</button>` : '<div class="note" style="margin-top:6px">รอเจ้าหน้าที่จัดซื้อรับทราบการแก้ไข</div>'}</div>` : '';
   const histHtml = log.length ? `<div class="sec hist"><h4>ประวัติการแก้ไข (${log.filter(e => e.kind === 'edit').length} ครั้ง)</h4>
       ${[...log].reverse().map(e => e.kind === 'ack'
         ? `<div class="h ack">รับทราบการแก้ไขโดย <b>${esc(e.by)}</b> <small>${fmtDT(e.at)}</small></div>`
-        : `<div class="h edit">แก้ไขโดย <b>${esc(e.by)}</b> <small>${fmtDT(e.at)}</small><ul>${(e.changes || []).map(c => `<li class="chg">${changeLine(c)}</li>`).join('')}</ul></div>`).join('')}</div>` : '';
+        : `<div class="h edit">แก้ไขโดย <b>${esc(e.by)}</b>${e.role ? ' (' + esc(e.role) + ')' : ''} <small>${fmtDT(e.at)}</small>${e.reason ? `<div>เหตุผล: ${esc(e.reason)}</div>` : ''}<ul>${(e.changes || []).map(c => `<li class="chg">${changeLine(c)}</li>`).join('')}</ul></div>`).join('')}</div>` : '';
 
   const actions = [];
   const left = [];
@@ -954,7 +972,9 @@ function openDetail(id, keepVendors) {
     if (staffCan && r.status === 'new') actions.push(`<button class="btn primary" data-act="ack" data-id="${r.id}">ยืนยันรับทราบ</button>`);
     if (staffCan && r.status === 'pending') actions.push(`<button class="btn ok" data-act="done" data-id="${r.id}" ${r.edit_flag ? 'disabled title="รับทราบการแก้ไขก่อน"' : ''}>เปลี่ยนเป็นเรียบร้อย</button>`);
     if (isAdmin() && r.status === 'done') actions.push(`<button class="btn" data-act="reopen" data-id="${r.id}">ย้อนกลับเป็นรอดำเนินการ</button>`);
-    if (isAdmin() && !S.adminEdit) left.push(`<button class="btn sm" data-act="adminEdit">แก้ไขข้อมูลคำขอ</button>`);
+    if (isAdmin() && !mode) left.push(`<button class="btn sm" data-act="edit" data-v="admin">แก้ไขข้อมูลคำขอ</button>`);
+    if (canOwner && !mode) left.push(`<button class="btn sm" data-act="edit" data-v="owner">แก้ไขใบงาน</button>`);
+    if (canOwner && r.status === 'new' && !mode) left.push(`<button class="btn sm danger" data-act="cancelReq" data-id="${r.id}">ยกเลิกใบงาน</button>`);
     if (isAdmin()) left.push(`<label class="btn sm" style="cursor:pointer">+ แนบไฟล์เพิ่ม<input type="file" multiple id="addFiles" class="hidden"></label>`);
     if (isStaff()) left.push(`<button class="btn sm danger" data-act="trash" data-id="${r.id}">ย้ายลงถัง</button>`);
   } else {
@@ -970,11 +990,24 @@ function openDetail(id, keepVendors) {
     <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${files}</div>
     <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
     ${histHtml}
-    ${!isStaff() ? `<p class="note" style="margin-top:16px">คุณดูได้อย่างเดียว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการแก้ไข</p>` : ''}
+    ${!isStaff() && !mode ? `<p class="note" style="margin-top:16px">${canOwner ? (r.status === 'new' ? 'จัดซื้อยังไม่รับทราบ แก้ไขหรือยกเลิกได้อิสระ' : 'แก้ไขได้จนกว่างานจะเรียบร้อย ต้องระบุเหตุผล และบรรทัดที่จัดซื้อซื้อแล้วจะแก้ไม่ได้') : 'ใบงานนี้แก้ไขไม่ได้แล้ว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการเปลี่ยนแปลง'}</p>` : ''}
     <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
   </div>`);
   if ($('#e_items')) initLines($('#e_items'));
   const af = $('#addFiles'); if (af) af.onchange = () => adminAddFiles(r.id, [...af.files]);
+}
+function editFormHtml(r, mode) {
+  const owner = mode === 'owner', needReason = owner && r.status !== 'new';
+  return `
+    ${needReason ? `<div class="callout" style="margin:12px 0">จัดซื้อรับทราบงานนี้แล้ว การแก้ไขจะแจ้งเตือนเจ้าหน้าที่ทันที และบรรทัดที่ซื้อแล้วจะถูกล็อกไว้</div>` : ''}
+    <div class="grid2">
+      <label class="f"><span>ชื่องาน</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
+      <label class="f"><span>แผนก</span><input class="inp" id="e_b" value="${esc(r.branch)}"></label>
+    </div>
+    <div id="e_items">${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l, itemsOf(r)[k], owner)).join('')}</div>
+    ${owner ? `<label class="f"><span>แนบไฟล์เพิ่ม (ไฟล์เดิมลบไม่ได้)</span><input class="inp" type="file" id="e_files" multiple></label>` : ''}
+    <label class="f"><span>เหตุผลที่แก้ไข${needReason ? ' (จำเป็น)' : ' (ถ้ามี)'}</span><textarea class="inp" id="e_reason" style="min-height:60px" placeholder="เช่น ลดจาก 20 เหลือ 10 รีม เพราะยังมีของเหลือ"></textarea></label>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="edit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="editSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`;
 }
 function readVendorInputs() {
   document.querySelectorAll('#vrows .vrow').forEach(row => {
@@ -1042,7 +1075,7 @@ function exportExcel() {
 
 /* ======================= modal ======================= */
 function openModal(html) { $('#sheet').innerHTML = html; $('#modal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-function closeModal() { $('#modal').classList.add('hidden'); document.body.style.overflow = ''; S.modalId = null; S.adminEdit = false; clearInterval(clockTimer); }
+function closeModal() { $('#modal').classList.add('hidden'); document.body.style.overflow = ''; S.modalId = null; S.editMode = null; clearInterval(clockTimer); }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeModal();
@@ -1072,7 +1105,7 @@ const A = {
   create: () => openCreate(),
   unpick: el => { S.pendingFiles.splice(+el.dataset.i, 1); drawPending(); },
   close: () => closeModal(),
-  open: (el, id) => { S.adminEdit = false; openDetail(id); },
+  open: (el, id) => { S.editMode = null; openDetail(id); },
   export: () => exportExcel(),
   calPrev: () => { S.calMonth.setMonth(S.calMonth.getMonth() - 1); renderContent(); },
   calNext: () => { S.calMonth.setMonth(S.calMonth.getMonth() + 1); renderContent(); },
@@ -1103,14 +1136,38 @@ const A = {
     if (await patch(id, fields, 'เปลี่ยนเป็นเรียบร้อยแล้ว')) closeModal();
   },
   reopen: async (el, id) => { if (await patch(id, { status: 'pending', completed_by: null, completed_at: null }, 'ย้อนกลับเป็นรอดำเนินการแล้ว')) openDetail(id); },
-  adminEdit: () => { S.adminEdit = !S.adminEdit; openDetail(S.modalId, true); },
-  adminSave: async (el, id) => {
+  edit: el => { S.editMode = S.editMode ? null : (el.dataset.v || null); openDetail(S.modalId, true); },
+  editSave: async (el, id) => {
+    const r = S.rows.find(x => x.id === id), owner = S.editMode === 'owner';
     const t = $('#e_title').value.trim(); if (!t) return toast('ใส่ชื่องานก่อนบันทึก', 'err');
     const { items, count, missing, earliest } = readLines($('#e_items'));
     if (!count) return toast('ต้องมีรายการอย่างน้อย 1 บรรทัด', 'err');
     if (missing) return toast('ใส่วันที่ต้องการใช้ให้ครบทุกบรรทัด', 'err');
-    S.adminEdit = false;
-    if (await patch(id, { branch: $('#e_b').value.trim(), title: t, items, needed_date: earliest }, 'บันทึกการแก้ไขแล้ว')) openDetail(id);
+    const reason = $('#e_reason').value.trim();
+    if (owner && r.status !== 'new' && !reason) return toast('กรุณาระบุเหตุผลที่แก้ไข', 'err');
+    const picked = owner ? [...($('#e_files')?.files || [])].filter(f => f.size <= CONFIG.MAX_FILE_MB * 1048576) : [];
+    el.disabled = true; el.textContent = 'กำลังบันทึก...';
+    let up = [];
+    try {
+      up = await uploadFiles(picked);
+      const fields = { branch: $('#e_b').value.trim(), title: t, items, needed_date: earliest || r.needed_date, edit_reason: reason || null };
+      if (up.length) fields.files = [...(r.files || []), ...up];
+      if (await patch(id, fields, r.status === 'new' || !owner ? 'บันทึกการแก้ไขแล้ว' : 'บันทึกแล้ว แจ้งเตือนเจ้าหน้าที่จัดซื้อแล้ว')) { S.editMode = null; openDetail(id); return; }
+    } catch (x) { toast(x.message, 'err'); }
+    if (up.length) sb.storage.from(CONFIG.BUCKET).remove(up.map(f => f.path)).catch(() => {});
+    el.disabled = false; el.textContent = 'บันทึกการแก้ไข';
+  },
+  cancelReq: async (el, id) => {
+    if (!confirm(`ยกเลิกใบงาน ${pr(id)}? ใบงานจะถูกย้ายไปถังขยะ`)) return;
+    if (await patch(id, { deleted_at: now(), deleted_by: S.me.full_name + ' (ผู้สั่งยกเลิก)' }, 'ยกเลิกใบงานแล้ว')) closeModal();
+  },
+  toggleBought: async (el, id) => {
+    const r = S.rows.find(x => x.id === id), g = el.dataset.g, i = +el.dataset.i;
+    const arr = itemsOf(r)[g], line = arr[i]; if (!line) return;
+    if (line.bought) { delete line.bought; delete line.bought_by; delete line.bought_at; }
+    else Object.assign(line, { bought: true, bought_by: S.me.full_name, bought_at: now() });
+    const items = { ...(r.items || {}), [g]: arr };
+    if (await patch(id, { items }, line.bought ? 'บันทึกว่าซื้อแล้ว' : 'ยกเลิกสถานะซื้อแล้ว')) openDetail(id, true); else openDetail(id, true);
   },
   trash: async (el, id) => { if (!confirm(`ย้าย ${pr(id)} ลงถังขยะ? กู้คืนได้ภายหลัง`)) return; if (await patch(id, { deleted_at: now(), deleted_by: S.me.full_name }, 'ย้ายลงถังขยะแล้ว')) closeModal(); },
   restore: async (el, id) => { if (await patch(id, { deleted_at: null, deleted_by: null, restored_at: now() }, 'กู้คืนแล้ว')) closeModal(); },
