@@ -217,6 +217,14 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .ilist li{padding:2px 0}
 .rtdot{width:10px;height:10px;border-radius:50%;flex:0 0 10px;background:#999}
 .rtdot.ok{background:#3BC07A}.rtdot.bad{background:#FF5C6F}.rtdot.wait{background:#F2B544}
+.s-ret{background:var(--amber-bg);color:var(--amber)}
+.ret{border:1px solid var(--line);border-left:4px solid var(--amber);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.ret.received{border-left-color:var(--green)}
+.ret .r1 .badge{margin-left:8px}
+.rrow{display:grid;grid-template-columns:1fr 110px 100px;gap:6px;align-items:center;margin-bottom:6px}
+.rcl{display:flex;gap:8px;align-items:center;cursor:pointer;min-width:0}
+.rcl span{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:640px){.rrow{grid-template-columns:1fr 1fr}.rcl{grid-column:1 / -1}}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -244,6 +252,7 @@ const CONFIG = {
   BUCKET: 'purchase-files',
   BRANCHES: ['สำนักงานใหญ่','ปลวกแดง'],
   ITEM_GROUPS: [['purchase', 'จัดซื้อ'], ['moririn', 'โมริริน']],
+  COMPANY_NAME: '',   // ชื่อบริษัทที่จะพิมพ์บนหัวใบคืนของ (เว้นว่างได้)
   MAX_FILE_MB: 50,
 };
 
@@ -328,6 +337,7 @@ async function testNotify() {
 /* ======================= สถานะแอป ======================= */
 let sb;
 const S = {
+  returns: [],
   user: null, me: null, rows: [], profiles: [],
   view: 'list', filter: 'open', q: '', type: '', calMonth: null,
   pendingFiles: [], modalId: null, editVendors: null, editMode: null,
@@ -388,6 +398,22 @@ document.addEventListener('keydown', e => {
   e.preventDefault();
   const row = e.target.closest('.line'); addLineAfter(row, row.parentElement);
 });
+const rtNo = id => 'RT-' + String(id).padStart(5, '0');
+const returnsOf = id => S.returns.filter(t => t.request_id === id).sort((a, b) => a.created_at.localeCompare(b.created_at));
+const hasPendRet = r => S.returns.some(t => t.request_id === r.id && t.status === 'pending');
+const attnAny = r => needsAttn(r) || hasPendRet(r);
+const groupLabel = g => (CONFIG.ITEM_GROUPS.find(x => x[0] === g) || [, g])[1];
+function returnable(r) {
+  if (r.deleted_at || r.status === 'new') return [];
+  const out = [];
+  Object.entries(itemsOf(r)).forEach(([g, arr]) => arr.forEach((x, i) => { if (r.status === 'done' || x.bought) out.push({ g, i, text: x.text }); }));
+  return out;
+}
+let clockTimer2;
+function startClock(label) {
+  const tick = () => { const c = $('#clock'); if (!c) return clearInterval(clockTimer2); c.textContent = label + ': ' + new Date().toLocaleString('th-TH', { timeZone: TZ, dateStyle: 'full', timeStyle: 'medium' }) + ' น.'; };
+  clearInterval(clockTimer2); tick(); clockTimer2 = setInterval(tick, 1000);
+}
 const needsAttn = r => r.status === 'new' || r.edit_flag;
 const short = (t, n = 120) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + '…' : t; };
 function changeLine(c) {
@@ -468,6 +494,8 @@ async function loadAll() {
   const { data, error } = await sb.from('requests').select('*').order('needed_date').limit(5000);
   if (error) { toast('โหลดข้อมูลไม่สำเร็จ: ' + error.message, 'err'); return; }
   S.rows = data;
+  const rt = await sb.from('returns').select('*').order('created_at').limit(5000);
+  if (!rt.error) S.returns = rt.data;
   if (isAdmin()) {
     const p = await sb.from('profiles').select('*').order('created_at');
     S.profiles = p.data || [];
@@ -526,6 +554,24 @@ function subscribe() {
       if (status === 'SUBSCRIBED') { rtSet('ok'); if (S.rtReady) resync(true); S.rtReady = true; }
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') rtSet('bad');
     });
+  sb.channel('rt-returns')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'returns' }, p => {
+      const n = p.new || {}, prev = S.returns.find(t => t.id === n.id);
+      const req = S.rows.find(r => r.id === n.request_id);
+      if (p.eventType === 'INSERT' && isStaff() && n.requester_id !== S.me.id)
+        notify('ขอคืนของ ' + rtNo(n.id), `${req ? pr(req.id) + ' ' + req.title : ''}\nคืนโดย ${n.returner_name || '-'}: ${(n.items || []).map(x => `${x.text} ${x.qty} ${x.unit || ''}`).join(', ')}`);
+      if (p.eventType === 'UPDATE' && n.requester_id === S.me.id && prev && prev.status !== n.status && n.status === 'received')
+        notify('รับคืนของแล้ว ' + rtNo(n.id), `รับคืนโดย ${n.received_by || '-'}`);
+      if (p.eventType === 'DELETE') S.returns = S.returns.filter(t => t.id !== p.old.id);
+      else { const i = S.returns.findIndex(t => t.id === n.id); if (i >= 0) S.returns[i] = { ...S.returns[i], ...n }; else S.returns.push(n); }
+      clearTimeout(rtTimer);
+      rtTimer = setTimeout(() => {
+        renderContent(); renderHeaderCounts();
+        // ถ้าเปิดใบงานนั้นอยู่และไม่ได้พิมพ์อะไรค้าง ให้ส่วนการคืนของอัปเดตทันที
+        const typing = document.activeElement && document.activeElement.closest('#sheet') && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+        if (S.modalId === n.request_id && !S.editMode && !$('#rf') && !typing) openDetail(S.modalId, true);
+      }, 200);
+    }).subscribe();
   sb.channel('rt-me')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: 'id=eq.' + S.me.id }, async p => {
       if (!p.new.active) { await sb.auth.signOut(); location.reload(); return; }
@@ -560,7 +606,7 @@ function renderShell() {
 }
 
 function renderHeaderCounts() {
-  const n = live().filter(needsAttn).length;
+  const n = live().filter(attnAny).length;
   const b = $('#bellN'); if (b) { b.textContent = n; b.classList.toggle('hidden', !n); }
   const t = $('#trashN'); if (t) t.textContent = trash().length;
   document.title = (isStaff() && n ? `(${n}) ` : '') + 'ระบบรับใบงาน_จัดซื้อ';
@@ -572,7 +618,7 @@ function filtered(base) {
     if (S.view !== 'trash') {
       if (S.filter === 'open' && r.status === 'done') return false;
       if (['new', 'pending', 'done'].includes(S.filter) && r.status !== S.filter) return false;
-      if (S.filter === 'attn' && !needsAttn(r)) return false;
+      if (S.filter === 'attn' && !attnAny(r)) return false;
     }
     if (S.type && r.req_type !== S.type) return false;
     if (q) {
@@ -593,7 +639,7 @@ function sortUrgent(list) {
 
 function toolbar(withStatus) {
   const counts = { open: 0, new: 0, pending: 0, done: 0, all: 0, attn: 0 };
-  live().forEach(r => { counts.all++; counts[r.status]++; if (r.status !== 'done') counts.open++; if (needsAttn(r)) counts.attn++; });
+  live().forEach(r => { counts.all++; counts[r.status]++; if (r.status !== 'done') counts.open++; if (attnAny(r)) counts.attn++; });
   const chips = [['open', 'ยังไม่เสร็จ'], ['new', 'งานใหม่'], ['pending', 'รอดำเนินการ'], ['done', 'เรียบร้อย'], ['all', 'ทั้งหมด']];
   if (isStaff()) chips.unshift(['attn', 'ต้องรับทราบ']);
   return `<div class="bar">
@@ -637,6 +683,7 @@ function ticket(r) {
       <div class="r1"><span class="prno">${pr(r.id)}</span><span class="type">${esc(r.branch || '')}</span>
         ${r.status === 'new' ? '<span class="new-dot" title="ยังไม่มีเจ้าหน้าที่รับทราบ"></span>' : ''}
         ${r.edit_flag ? '<span class="badge s-edit">มีการแก้ไข</span>' : ''}
+        ${hasPendRet(r) ? '<span class="badge s-ret">มีของคืนรอรับ</span>' : ''}
         <span class="badge s-${r.status}" ${r.edit_flag ? 'style="margin-left:0"' : ''}>${STATUS[r.status]}</span></div>
       <div class="ttl">${esc(r.title)}</div>
       <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b></span>
@@ -699,6 +746,8 @@ function buildToday() {
     inToday: live().filter(r => bkDay(r.created_at) === t).length,
     doneToday: S.rows.filter(r => r.status === 'done' && bkDay(r.completed_at) === t).length,
   };
+  const retReq = live().filter(hasPendRet);
+  if (retReq.length) groups.splice(1, 0, { cls: 'g-attn', title: 'รอรับคืนของ', hint: 'ผู้สั่งส่งของคืน ตรวจของแล้วกดยืนยันรับคืนในใบงาน', items: retReq });
   return { groups, shops, noVendor, stats };
 }
 function trow(r) {
@@ -976,6 +1025,7 @@ function openDetail(id, keepVendors) {
     if (canOwner && !mode) left.push(`<button class="btn sm" data-act="edit" data-v="owner">แก้ไขใบงาน</button>`);
     if (canOwner && r.status === 'new' && !mode) left.push(`<button class="btn sm danger" data-act="cancelReq" data-id="${r.id}">ยกเลิกใบงาน</button>`);
     if (isAdmin()) left.push(`<label class="btn sm" style="cursor:pointer">+ แนบไฟล์เพิ่ม<input type="file" multiple id="addFiles" class="hidden"></label>`);
+    if ((r.requester_id === S.me.id || isStaff()) && returnable(r).length && !mode) left.push(`<button class="btn sm" data-act="returnForm" data-id="${r.id}">คืนของ</button>`);
     if (isStaff()) left.push(`<button class="btn sm danger" data-act="trash" data-id="${r.id}">ย้ายลงถัง</button>`);
   } else {
     if (isStaff()) actions.push(`<button class="btn" data-act="restore" data-id="${r.id}">กู้คืน</button>`);
@@ -989,6 +1039,7 @@ function openDetail(id, keepVendors) {
     ${info}
     <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${files}</div>
     <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
+    ${returnsHtml(r)}
     ${histHtml}
     ${!isStaff() && !mode ? `<p class="note" style="margin-top:16px">${canOwner ? (r.status === 'new' ? 'จัดซื้อยังไม่รับทราบ แก้ไขหรือยกเลิกได้อิสระ' : 'แก้ไขได้จนกว่างานจะเรียบร้อย ต้องระบุเหตุผล และบรรทัดที่จัดซื้อซื้อแล้วจะแก้ไม่ได้') : 'ใบงานนี้แก้ไขไม่ได้แล้ว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการเปลี่ยนแปลง'}</p>` : ''}
     <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
@@ -1008,6 +1059,135 @@ function editFormHtml(r, mode) {
     ${owner ? `<label class="f"><span>แนบไฟล์เพิ่ม (ไฟล์เดิมลบไม่ได้)</span><input class="inp" type="file" id="e_files" multiple></label>` : ''}
     <label class="f"><span>เหตุผลที่แก้ไข${needReason ? ' (จำเป็น)' : ' (ถ้ามี)'}</span><textarea class="inp" id="e_reason" style="min-height:60px" placeholder="เช่น ลดจาก 20 เหลือ 10 รีม เพราะยังมีของเหลือ"></textarea></label>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="edit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="editSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`;
+}
+/* ======================= คืนของ ======================= */
+function returnsHtml(r) {
+  const list = returnsOf(r.id); if (!list.length) return '';
+  return `<div class="sec"><h4>การคืนของ (${list.length})</h4>${list.map(t => `
+    <div class="ret ${t.status}">
+      <div class="r1"><span class="prno">${rtNo(t.id)}</span><span class="badge ${t.status === 'received' ? 's-done' : 's-ret'}">${t.status === 'received' ? 'รับคืนแล้ว' : 'รอรับคืน'}</span></div>
+      <small class="note">คืนโดย ${esc(t.returner_name)} เมื่อ ${fmtDT(t.created_at)}${t.status === 'received' ? `, รับคืนโดย ${esc(t.received_by)} เมื่อ ${fmtDT(t.received_at)}` : ''}</small>
+      <ol class="ilist">${(t.items || []).map(x => `<li>${esc(x.text)} <b>${esc(x.qty)} ${esc(x.unit || '')}</b> <span class="note">(${esc(groupLabel(x.group))})</span></li>`).join('')}</ol>
+      ${t.note ? `<div class="box" style="margin-top:6px">${esc(t.note)}</div>` : ''}
+      ${(t.files || []).map(f => `<div class="file" style="margin-top:6px"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('')}
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
+        ${t.status === 'pending' && t.requester_id === S.me.id ? `<button class="btn sm danger" data-act="retCancel" data-rid="${t.id}">ยกเลิกการคืน</button>` : ''}
+        ${t.status === 'pending' && isStaff() ? `<button class="btn sm ok" data-act="retConfirm" data-rid="${t.id}">ยืนยันรับคืน</button>` : ''}
+        ${t.status === 'received' && isStaff() ? `<button class="btn sm dark" data-act="retPrint" data-rid="${t.id}">พิมพ์ใบคืนของ</button>` : ''}
+      </div>
+    </div>`).join('')}</div>`;
+}
+function openReturnForm(id) {
+  const r = S.rows.find(x => x.id === id); if (!r) return;
+  const lines = returnable(r);
+  S.pendingFiles = [];
+  const byG = {}; lines.forEach(l => (byG[l.g] ||= []).push(l));
+  openModal(`
+  <div class="sh-h"><div><span class="prno">${pr(r.id)}</span><h2>คืนของ: ${esc(r.title)}</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
+  <form class="sh-b" id="rf">
+    <div class="clock" id="clock"></div>
+    <p class="note" style="margin-top:0">ติ๊กเลือกของที่จะคืน แล้วใส่จำนวนกับหน่วย${r.status === 'pending' ? ' (แสดงเฉพาะรายการที่จัดซื้อซื้อแล้ว)' : ''}</p>
+    ${Object.entries(byG).map(([g, arr]) => `<div class="lines"><h4 class="lh">${esc(groupLabel(g))}</h4>
+      ${arr.map(l => `<div class="rrow" data-g="${l.g}" data-i="${l.i}" data-text="${esc(l.text)}">
+        <label class="rcl"><input type="checkbox" class="rc"> <span>${esc(l.text)}</span></label>
+        <input class="inp rq" type="number" min="0" step="any" inputmode="decimal" placeholder="จำนวน" disabled>
+        <input class="inp ru" placeholder="หน่วย" maxlength="30" disabled></div>`).join('')}</div>`).join('')}
+    <label class="f"><span>เหตุผล / หมายเหตุ</span><textarea class="inp" name="note" style="min-height:60px" placeholder="เช่น ใช้ไม่หมด เหลือ 5 รีม"></textarea></label>
+    <label class="f"><span>แนบรูปหรือไฟล์ของที่คืน</span><input class="inp" type="file" id="fpick" multiple accept="image/*,.pdf"></label>
+    <div id="flist"></div>
+    <div class="foot"><button type="button" class="btn" data-act="open" data-id="${r.id}">ย้อนกลับ</button><button class="btn primary" id="rfBtn">ส่งคืนของ</button></div>
+  </form>`);
+  startClock('วันเวลาที่คืน');
+  const f = $('#rf');
+  f.addEventListener('change', e => {
+    if (!e.target.classList.contains('rc')) return;
+    const row = e.target.closest('.rrow'), on = e.target.checked;
+    row.querySelectorAll('.rq, .ru').forEach(i => i.disabled = !on);
+    if (on) row.querySelector('.rq').focus();
+  });
+  $('#fpick').onchange = e => {
+    for (const x of e.target.files) { if (x.size > CONFIG.MAX_FILE_MB * 1048576) { toast(`${x.name} ใหญ่เกิน ${CONFIG.MAX_FILE_MB} MB`, 'err'); continue; } S.pendingFiles.push(x); }
+    e.target.value = ''; drawPending();
+  };
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const items = [];
+    for (const row of f.querySelectorAll('.rrow')) {
+      if (!row.querySelector('.rc').checked) continue;
+      const qty = parseFloat(row.querySelector('.rq').value);
+      if (!(qty > 0)) return toast('ใส่จำนวนที่คืนให้ครบทุกรายการที่ติ๊ก', 'err');
+      items.push({ group: row.dataset.g, idx: +row.dataset.i, text: row.dataset.text, qty, unit: row.querySelector('.ru').value.trim() });
+    }
+    if (!items.length) return toast('ติ๊กเลือกของที่จะคืนอย่างน้อย 1 รายการ', 'err');
+    const btn = $('#rfBtn'); btn.disabled = true; btn.textContent = 'กำลังส่ง...';
+    let files = [];
+    try {
+      files = await uploadFiles(S.pendingFiles);
+      const { data, error } = await sb.from('returns').insert({ request_id: r.id, requester_id: S.me.id, items, note: f.note.value.trim() || null, files }).select().single();
+      if (error) throw new Error(error.message);
+      if (!S.returns.some(t => t.id === data.id)) S.returns.push(data);
+      toast(`ส่งคืนของแล้ว (${rtNo(data.id)}) รอเจ้าหน้าที่ยืนยันรับคืน`);
+      renderContent(); renderHeaderCounts(); openDetail(r.id);
+    } catch (x) {
+      if (files.length) sb.storage.from(CONFIG.BUCKET).remove(files.map(z => z.path)).catch(() => {});
+      toast(x.message, 'err'); btn.disabled = false; btn.textContent = 'ส่งคืนของ';
+    }
+  };
+}
+function printReturn(t) {
+  const r = S.rows.find(x => x.id === t.request_id) || {};
+  const dLong = iso => iso ? new Date(iso).toLocaleDateString('th-TH', { timeZone: TZ, day: 'numeric', month: 'long', year: 'numeric' }) : '-';
+  const tm = iso => iso ? new Date(iso).toLocaleTimeString('th-TH', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }) + ' น.' : '';
+  const html = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>ใบคืนของ ${rtNo(t.id)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    @page{size:A4;margin:16mm}
+    body{font:14px/1.6 "IBM Plex Sans Thai","Sarabun",sans-serif;color:#000;margin:0}
+    .hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:14px}
+    h1{font-size:24px;margin:0} .co{font-size:13px;color:#333}
+    .no{text-align:right;font-size:13px} .no b{font-size:18px;display:block}
+    .info{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:16px}
+    .info span{color:#555;display:inline-block;min-width:96px}
+    table{width:100%;border-collapse:collapse;margin-bottom:14px}
+    th,td{border:1px solid #000;padding:6px 8px;text-align:left;vertical-align:top}
+    th{background:#eee;font-weight:600} td.n,th.n{text-align:center;width:44px} td.q,th.q{text-align:right;width:90px} td.u,th.u{width:80px}
+    .note{border:1px solid #000;padding:8px;min-height:40px;margin-bottom:28px}
+    .sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;text-align:center;margin-top:36px}
+    .sign .l{border-bottom:1px dotted #000;height:36px;margin-bottom:6px}
+    .ft{margin-top:28px;font-size:11px;color:#666;text-align:right}
+  </style></head><body>
+  <div class="hd"><div><h1>ใบคืนของ</h1><div class="co">${esc(CONFIG.COMPANY_NAME || '')}${CONFIG.COMPANY_NAME ? ' / ' : ''}ระบบรับใบงาน_จัดซื้อ</div></div>
+    <div class="no">เลขที่ใบคืนของ<b>${rtNo(t.id)}</b></div></div>
+  <div class="info">
+    <div><span>เลขที่ใบ PR</span><b>${pr(t.request_id)}</b></div>
+    <div><span>ชื่องาน</span><b>${esc(r.title || '-')}</b></div>
+    <div><span>แผนก</span>${esc(r.branch || '-')}</div>
+    <div><span>ชื่อผู้คืน</span><b>${esc(t.returner_name || '-')}</b></div>
+    <div><span>วันที่คืน</span><b>${dLong(t.created_at)}</b> ${tm(t.created_at)}</div>
+    <div><span>รับคืนโดย</span>${esc(t.received_by || '-')}, ${dLong(t.received_at)} ${tm(t.received_at)}</div>
+  </div>
+  <table><thead><tr><th class="n">ลำดับ</th><th>สิ่งของที่คืน</th><th>กลุ่ม</th><th class="q">จำนวน</th><th class="u">หน่วย</th></tr></thead><tbody>
+    ${(t.items || []).map((x, i) => `<tr><td class="n">${i + 1}</td><td>${esc(x.text)}</td><td>${esc(groupLabel(x.group))}</td><td class="q">${esc(x.qty)}</td><td class="u">${esc(x.unit || '')}</td></tr>`).join('')}
+  </tbody></table>
+  <div><b>หมายเหตุ</b></div><div class="note">${esc(t.note || '')}</div>
+  <div class="sign">
+    <div><div class="l"></div>ผู้คืน<br>(${esc(t.returner_name || '')})<br>วันที่ ........./........./.........</div>
+    <div><div class="l"></div>ผู้รับคืน<br>(${esc(t.received_by || '')})<br>วันที่ ........./........./.........</div>
+  </div>
+  <div class="ft">พิมพ์เมื่อ ${fmtDT(new Date().toISOString())}</div>
+  </body></html>`;
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(fr);
+  const d = fr.contentDocument; d.open(); d.write(html); d.close();
+  let printed = false;
+  const go = () => {
+    if (printed) return; printed = true;
+    try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch { toast('พิมพ์ไม่สำเร็จ ลองเปิดจากเบราว์เซอร์ Chrome', 'err'); }
+    setTimeout(() => fr.remove(), 60000);
+  };
+  fr.onload = () => (d.fonts ? d.fonts.ready.then(go) : go());
+  setTimeout(go, 3000);
 }
 function readVendorInputs() {
   document.querySelectorAll('#vrows .vrow').forEach(row => {
@@ -1033,7 +1213,7 @@ async function adminAddFiles(id, files) {
 }
 async function purge(ids) {
   const rows = S.rows.filter(r => ids.includes(r.id));
-  const paths = rows.flatMap(r => (r.files || []).map(f => f.path));
+  const paths = [...rows.flatMap(r => (r.files || []).map(f => f.path)), ...S.returns.filter(t => ids.includes(t.request_id)).flatMap(t => (t.files || []).map(f => f.path))];
   if (paths.length) await sb.storage.from(CONFIG.BUCKET).remove(paths).catch(() => {});
   const { error } = await sb.from('requests').delete().in('id', ids);
   if (error) return toast(error.message, 'err');
@@ -1061,13 +1241,14 @@ function exportExcel() {
       'แก้ไขแล้ว (ครั้ง)': (r.edit_log || []).filter(e => e.kind === 'edit').length,
       'การแก้ไขรอรับทราบ': r.edit_flag ? 'ใช่' : '',
       'ประวัติการแก้ไข': (r.edit_log || []).map(e => e.kind === 'ack' ? `${bk(e.at)} รับทราบโดย ${e.by}` : `${bk(e.at)} แก้โดย ${e.by}: ${(e.changes || []).map(c => c.from === undefined ? `${c.field} ${c.to}` : `${c.field} จาก "${c.from ?? ''}" เป็น "${c.to ?? ''}"`).join('; ')}`).join('\n'),
+      'การคืนของ': returnsOf(r.id).map(t => `${rtNo(t.id)} ${t.status === 'received' ? 'รับคืนแล้ว' : 'รอรับคืน'}: ${(t.items || []).map(x => `${x.text} ${x.qty} ${x.unit || ''}`.trim()).join(', ')}`).join('\n'),
       'จำนวนไฟล์': (r.files || []).length, 'ชื่อไฟล์': (r.files || []).map(f => f.name).join(', '),
     };
     if (inTrash) { o['ลบเมื่อ'] = bk(r.deleted_at); o['ลบโดย'] = r.deleted_by || ''; }
     return o;
   });
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['ชื่องาน', 'รายการจัดซื้อ', 'รายการโมริริน', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์', 'ประวัติการแก้ไข'].includes(k) ? 36 : 18 }));
+  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: ['ชื่องาน', 'รายการจัดซื้อ', 'รายการโมริริน', 'การคืนของ', 'ร้าน / บุคคล', 'หมายเหตุเจ้าหน้าที่', 'ชื่อไฟล์', 'ประวัติการแก้ไข'].includes(k) ? 36 : 18 }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, inTrash ? 'ถังขยะ' : 'ใบงาน');
   XLSX.writeFile(wb, `${inTrash ? 'ถังขยะ_ระบบรับใบงาน_จัดซื้อ' : 'ระบบรับใบงาน_จัดซื้อ'}_${todayYMD()}.xlsx`);
@@ -1075,7 +1256,7 @@ function exportExcel() {
 
 /* ======================= modal ======================= */
 function openModal(html) { $('#sheet').innerHTML = html; $('#modal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-function closeModal() { $('#modal').classList.add('hidden'); document.body.style.overflow = ''; S.modalId = null; S.editMode = null; clearInterval(clockTimer); }
+function closeModal() { $('#modal').classList.add('hidden'); document.body.style.overflow = ''; S.modalId = null; S.editMode = null; clearInterval(clockTimer); clearInterval(clockTimer2); }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeModal();
@@ -1088,6 +1269,25 @@ const A = {
   lineAdd: el => { const box = el.closest('.lines').querySelector('.lrows'); addLineAfter(box.lastElementChild, box); },
   lineDel: el => { const row = el.closest('.line'), box = row.parentElement; if (box.children.length > 1) row.remove(); else { row.querySelector('.lt').value = ''; row.querySelector('.ld').value = ''; } renumber(box); },
   testNotify: () => { ensureAudio(); testNotify(); },
+  returnForm: (el, id) => openReturnForm(id),
+  retConfirm: async el => {
+    const t = S.returns.find(x => x.id === +el.dataset.rid); if (!t) return;
+    if (!confirm(`ยืนยันว่าได้รับของคืนตาม ${rtNo(t.id)} ครบแล้ว?`)) return;
+    const { data, error } = await sb.from('returns').update({ status: 'received' }).eq('id', t.id).select().single();
+    if (error) return toast(error.message, 'err');
+    Object.assign(t, data); toast('ยืนยันรับคืนแล้ว พิมพ์ใบคืนของได้เลย');
+    renderContent(); renderHeaderCounts(); openDetail(t.request_id, true);
+  },
+  retCancel: async el => {
+    const t = S.returns.find(x => x.id === +el.dataset.rid); if (!t) return;
+    if (!confirm(`ยกเลิกการคืนของ ${rtNo(t.id)}?`)) return;
+    const { error } = await sb.from('returns').delete().eq('id', t.id);
+    if (error) return toast(error.message, 'err');
+    if ((t.files || []).length) sb.storage.from(CONFIG.BUCKET).remove(t.files.map(f => f.path)).catch(() => {});
+    S.returns = S.returns.filter(x => x.id !== t.id); toast('ยกเลิกการคืนแล้ว');
+    renderContent(); renderHeaderCounts(); openDetail(t.request_id, true);
+  },
+  retPrint: el => { const t = S.returns.find(x => x.id === +el.dataset.rid); if (t) printReturn(t); },
   copySummary: async () => { await copyText(summaryText()); toast('คัดลอกสรุปแล้ว วางในไลน์กลุ่มได้เลย'); },
   sound: () => {
     const on = !soundOn();
