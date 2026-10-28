@@ -210,7 +210,31 @@ label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .line.locked .lro{padding:8px 10px;background:var(--paper);border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lock,.okb{font-size:12px;color:var(--green);font-weight:600;white-space:nowrap}
 .bchk{font-size:12.5px;white-space:nowrap;margin-left:6px;color:var(--green);cursor:pointer}
-.ilist li.bought>.it{text-decoration:line-through;color:var(--muted)}
+.ilist li.bought .it{color:var(--muted)}
+.lirow{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.lirow .btn{margin-left:auto}
+.doneinfo{font-size:13px;color:var(--green);margin:2px 0 6px}
+.doneinfo a,.refund a{color:var(--blue)}
+.budget{border:1px solid var(--line);border-radius:8px;padding:4px 12px}
+.budget div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-variant-numeric:tabular-nums}
+.budget div:last-child{border-bottom:0}
+.budget .tot{font-weight:700;font-size:15.5px}
+.unlockbox{background:var(--amber-bg);border-left:4px solid var(--amber);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+.unlockbox.ok{background:var(--blue-bg);border-left-color:var(--blue)}
+.unlockbox b{display:block;margin-bottom:4px}
+.unlockbox .acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
+.contacts{margin-top:10px}
+.contacts .ct{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.contacts .ct>div{flex:1;min-width:0}
+.contacts .ct small{display:block;color:var(--muted)}
+.btn.line{background:#06C755;border-color:#06C755;color:#fff;text-decoration:none}
+a.btn{text-decoration:none;display:inline-block}
+.chk{display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer}
+.lbl{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.fadd{margin:6px 0}
+.refund{font-size:13.5px;margin-top:8px}
+.lines.locked-g{opacity:.85}
+
 @media (max-width:640px){.line{grid-template-columns:24px 1fr auto}.line .ld{grid-column:2}.lhead{display:none}}
 .line .ln{color:var(--muted);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
 .ilist{margin:0;padding-left:22px}
@@ -250,7 +274,7 @@ const CONFIG = {
   SUPABASE_ANON_KEY: 'sb_publishable_WdCOu73wY1xQuM70rs6NbA_vDNO5_0-',   // Publishable key
   EMAIL_DOMAIN: 'purchase.local',      // ใช้แปลง "ชื่อผู้ใช้" เป็นอีเมลภายใน ไม่มีการส่งเมลจริง
   BUCKET: 'purchase-files',
-  BRANCHES: ['สำนักงานใหญ่','สาขาปลวกแดง'],
+  BRANCHES: ['สำนักงานใหญ่','สาขา 2','สาขา 3','สาขา 4','สาขา 5','สาขา 6','สาขา 7','สาขา 8','สาขา 9'],
   ITEM_GROUPS: [['purchase', 'จัดซื้อ'], ['moririn', 'โมริริน']],
   COMPANY_NAME: '',   // ชื่อบริษัทที่จะพิมพ์บนหัวใบคืนของ (เว้นว่างได้)
   MAX_FILE_MB: 50,
@@ -337,7 +361,7 @@ async function testNotify() {
 /* ======================= สถานะแอป ======================= */
 let sb;
 const S = {
-  returns: [],
+  returns: [], contacts: [],
   user: null, me: null, rows: [], profiles: [],
   view: 'list', filter: 'open', q: '', type: '', calMonth: null,
   pendingFiles: [], modalId: null, editVendors: null, editMode: null,
@@ -358,25 +382,27 @@ const itemsOf = r => {
   return o;
 };
 const itemDates = r => [...new Set(Object.values(itemsOf(r)).flat().map(x => x.date).filter(Boolean))].sort();
-const itemLabel = x => `${x.text} (${fmtD(x.date)})${x.bought ? ' ✓ดำเนินการแล้ว' : ''}`;
+const itemLabel = x => `${x.text} (${fmtD(x.date)})${x.bought ? ' ✓ดำเนินการแล้ว' : ''}${x.price != null ? ' ' + fmtB(x.price) + ' บาท' : ''}`;
 const itemProgress = r => { const a = Object.values(itemsOf(r)).flat(); return [a.filter(x => x.bought).length, a.length]; };
-function linesBlock(key, label, values, lockBought) {
+function linesBlock(key, label, values, lockBought, lockAll) {
+  if (lockAll) return `<div class="lines locked-g" data-g="${key}"><h4 class="lh">${label} <span class="note">(ไม่ได้ปลดล็อก)</span></h4>
+    <div class="lrows">${(values || []).map(v => lineRow(v, true, isDoneLine(v) ? 'ดำเนินการแล้ว' : 'ล็อก')).join('') || '<p class="note">ไม่มีรายการ</p>'}</div></div>`;
   const vals = values && values.length ? values : [{ text: '', date: '' }];
   return `<div class="lines" data-g="${key}"><h4 class="lh">${label}</h4>
     <div class="lhead"><span></span><span>รายการ</span><span>วันที่ต้องการใช้</span><span></span></div>
-    <div class="lrows">${vals.map(v => lineRow(v, lockBought && v.bought)).join('')}</div>
+    <div class="lrows">${vals.map(v => lineRow(v, lockBought && isDoneLine(v), 'ดำเนินการแล้ว')).join('')}</div>
     <button type="button" class="btn sm" data-act="lineAdd">+ เพิ่มบรรทัด</button></div>`;
 }
-const lineRow = (v = {}, locked) => {
+const lineRow = (v = {}, locked, lockText = 'ดำเนินการแล้ว') => {
   if (locked) return `<div class="line locked" data-item="${esc(JSON.stringify(v))}"><span class="ln"></span>
-    <span class="lro">${esc(v.text)}</span><span class="lro">${fmtD(v.date)}</span><span class="lock" title="เจ้าหน้าที่ดำเนินการแล้ว แก้ไขหรือลบไม่ได้">🔒 ดำเนินการแล้ว</span></div>`;
-  const extra = {}; ['bought', 'bought_by', 'bought_at'].forEach(k => { if (v[k] !== undefined) extra[k] = v[k]; });
+    <span class="lro">${esc(v.text)}</span><span class="lro">${fmtD(v.date)}</span><span class="lock" title="แก้ไขหรือลบไม่ได้">🔒 ${lockText}</span></div>`;
+  const extra = {}; ['bought', 'bought_by', 'bought_at', 'price', 'receipts'].forEach(k => { if (v[k] !== undefined) extra[k] = v[k]; });
   return `<div class="line" data-extra="${esc(JSON.stringify(extra))}"><span class="ln"></span>
   <input class="inp lt" value="${esc(v.text || '')}" maxlength="300">
   <input class="inp ld" type="date" value="${esc(v.date || '')}" aria-label="วันที่ต้องการใช้">
   <button type="button" class="btn sm" data-act="lineDel" aria-label="ลบบรรทัดนี้">✕</button></div>`;
 };
-function renumber(box) { box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; const t = l.querySelector('.lt'); if (t) t.placeholder = 'บรรทัดที่ ' + (i + 1); }); }
+function renumber(box) { if (!box) return; box.querySelectorAll('.line').forEach((l, i) => { l.querySelector('.ln').textContent = (i + 1) + '.'; const t = l.querySelector('.lt'); if (t) t.placeholder = 'บรรทัดที่ ' + (i + 1); }); }
 function readLines(root) {
   const o = {}; let missing = 0;
   root.querySelectorAll('.lines').forEach(b => {
@@ -391,7 +417,7 @@ function readLines(root) {
   const all = Object.values(o).flat();
   return { items: o, count: all.length, missing, earliest: all.filter(x => !x.bought).map(x => x.date).filter(Boolean).sort()[0] || all.map(x => x.date).filter(Boolean).sort()[0] };
 }
-function initLines(root) { root.querySelectorAll('.lines .lrows').forEach(renumber); }
+function initLines(root) { root.querySelectorAll('.lines:not(.locked-g) .lrows').forEach(renumber); root.querySelectorAll('.locked-g .line').forEach((l, i) => l.querySelector('.ln').textContent = (i + 1) + '.'); }
 function addLineAfter(row, box) {
   const date = row?.querySelector('.ld')?.value || '';
   if (row) row.insertAdjacentHTML('afterend', lineRow({ date })); else box.insertAdjacentHTML('beforeend', lineRow({ date }));
@@ -403,6 +429,25 @@ document.addEventListener('keydown', e => {
   e.preventDefault();
   const row = e.target.closest('.line'); addLineAfter(row, row.parentElement);
 });
+const fmtB = n => Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const isDoneLine = x => !!(x.bought || x.price != null || (x.receipts || []).length);
+const lineUrl = v => /^https?:\/\//i.test(v) ? v : v.startsWith('@') ? 'https://line.me/R/ti/p/' + encodeURIComponent(v) : 'https://line.me/ti/p/~' + encodeURIComponent(v.replace(/^~/, ''));
+const unlockForMe = r => r.unlock?.state === 'requested' && (S.me?.role === 'admin' || (r.unlock.sides || []).some(x => mySides().includes(x)));
+function budget(r) {
+  const per = {}; let total = 0, priced = 0, all = 0;
+  Object.entries(itemsOf(r)).forEach(([g, a]) => a.forEach(x => { all++; if (x.price != null && x.price !== '') { const p = +x.price || 0; per[g] = (per[g] || 0) + p; total += p; priced++; } }));
+  const refund = returnsOf(r.id).reduce((t, x) => t + (+x.refund_amount || 0), 0);
+  return { per, total, priced, all, refund, net: total - refund };
+}
+const fileAdder = (label = '+ แนบไฟล์', accept = '') => `<div class="fadd"><input type="file" id="fpick" multiple class="hidden" ${accept ? `accept="${accept}"` : ''}><button type="button" class="btn sm" data-act="pickFile" data-label="${esc(label)}">${label}</button></div>`;
+function bindFileAdder() {
+  const p = $('#fpick'); if (!p) return;
+  p.onchange = e => {
+    for (const f of e.target.files) { if (f.size > CONFIG.MAX_FILE_MB * 1048576) { toast(`${f.name} ใหญ่เกิน ${CONFIG.MAX_FILE_MB} MB`, 'err'); continue; } S.pendingFiles.push(f); }
+    e.target.value = ''; drawPending();
+  };
+}
+const fileRow = f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}${f.uploaded_by ? ', แนบโดย ' + esc(f.uploaded_by) : ''}${f.uploaded_at ? ' เมื่อ ' + fmtDT(f.uploaded_at) : ''}</small></div><button type="button" class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`;
 const rtNo = id => 'RT-' + String(id).padStart(5, '0');
 const returnsOf = id => S.returns.filter(t => t.request_id === id).sort((a, b) => a.created_at.localeCompare(b.created_at));
 const hasPendRet = r => S.returns.some(t => t.request_id === r.id && t.status === 'pending');
@@ -419,7 +464,7 @@ function startClock(label) {
   const tick = () => { const c = $('#clock'); if (!c) return clearInterval(clockTimer2); c.textContent = label + ': ' + new Date().toLocaleString('th-TH', { timeZone: TZ, dateStyle: 'full', timeStyle: 'medium' }) + ' น.'; };
   clearInterval(clockTimer2); tick(); clockTimer2 = setInterval(tick, 1000);
 }
-const needsAttn = r => r.status === 'new' || flagSides(r).some(x => mySides().includes(x));
+const needsAttn = r => r.status === 'new' || flagSides(r).some(x => mySides().includes(x)) || unlockForMe(r);
 const short = (t, n = 120) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + '…' : t; };
 function changeLine(c) {
   const v = x => c.date ? fmtD(x) : esc(short(x || '(ว่าง)'));
@@ -495,10 +540,15 @@ async function enter() {
   subscribe();
 }
 
+async function loadContacts() {
+  const c = await sb.from('profiles').select('id,full_name,role,phone,line_id,active').in('role', ['staff', 'moririn', 'admin']).eq('active', true);
+  if (!c.error) S.contacts = c.data || [];
+}
 async function loadAll() {
   const { data, error } = await sb.from('requests').select('*').order('needed_date').limit(5000);
   if (error) { toast('โหลดข้อมูลไม่สำเร็จ: ' + error.message, 'err'); return; }
   S.rows = data;
+  await loadContacts();
   const rt = await sb.from('returns').select('*').order('created_at').limit(5000);
   if (!rt.error) S.returns = rt.data;
   if (isAdmin()) {
@@ -540,6 +590,15 @@ function subscribe() {
       }
       if (p.eventType === 'UPDATE') {
         const prev = S.rows.find(r => r.id === n.id);
+          if (prev && 'unlock' in n && JSON.stringify(prev.unlock || null) !== JSON.stringify(n.unlock || null)) {
+            const u = n.unlock, pu = prev.unlock;
+            if (u?.state === 'requested' && isStaff() && n.requester_id !== S.me.id && (isAdmin() || (u.sides || []).some(x => mySides().includes(x))))
+              notify('ขอปลดล็อกแก้ไข ' + pr(n.id), `${n.title}\n${u.req_by}: ${u.reason}`);
+            if (n.requester_id === S.me.id && pu?.state === 'requested') {
+              if (u?.state === 'unlocked') notify('ปลดล็อกแล้ว ' + pr(n.id), 'แก้ไขใบงานได้แล้ว (แก้ได้ 1 ครั้ง)');
+              else if (!u) notify('ไม่อนุมัติการปลดล็อก ' + pr(n.id), 'ติดต่อเจ้าหน้าที่เพื่อสอบถาม');
+            }
+          }
         const pl = (prev?.edit_log || []).length, nl = (n.edit_log || []).length;
         const last = (n.edit_log || [])[nl - 1];
         if (prev && nl > pl && last?.kind === 'edit' && last.by !== S.me.full_name && (n.requester_id === S.me.id || (isStaff() && (!last.sides || last.sides.some(x => mySides().includes(x)))))) {
@@ -689,6 +748,7 @@ function ticket(r) {
         ${r.status === 'new' ? '<span class="new-dot" title="ยังไม่มีเจ้าหน้าที่รับทราบ"></span>' : ''}
         ${anyFlag(r) ? `<span class="badge s-edit">แก้ไข: ${flagSides(r).map(x => SIDE_LABEL[x]).join(', ')}</span>` : ''}
         ${hasPendRet(r) ? '<span class="badge s-ret">มีของคืนรอรับ</span>' : ''}
+        ${r.unlock?.state === 'requested' ? '<span class="badge s-ret">ขอปลดล็อก</span>' : r.unlock?.state === 'unlocked' ? '<span class="badge s-new">ปลดล็อกแล้ว</span>' : ''}
         <span class="badge s-${r.status}" ${anyFlag(r) ? 'style="margin-left:0"' : ''}>${STATUS[r.status]}</span></div>
       <div class="ttl">${esc(r.title)}</div>
       <div class="meta"><span>ผู้สั่ง <b>${esc(r.requester_name)}</b></span>
@@ -696,6 +756,7 @@ function ticket(r) {
         <span>ต้องการ <b>${(() => { const d = itemDates(r); return d.length > 1 ? fmtD(d[0]) + ' ถึง ' + fmtD(d[d.length - 1]) : fmtD(r.needed_date); })()}</b></span>
         ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const n = itemsOf(r)[k].length; return n ? `<span>${l} <b>${n}</b> รายการ</span>` : ''; }).join('')}
         ${(() => { const [b, n] = itemProgress(r); return b ? `<span>ดำเนินการแล้ว <b>${b}/${n}</b></span>` : ''; })()}
+        ${(() => { const t = budget(r).total; return t ? `<span>งบ <b>${fmtB(t)}</b></span>` : ''; })()}
         <span>ไฟล์ <b>${(r.files || []).length}</b></span></div>
       ${vend.length ? `<div class="vend">ร้าน/บุคคล: ${vend.map(v => (v.done ? '✓ ' : '') + esc(v.name)).join(', ')}</div>` : ''}
     </div></div>`;
@@ -711,6 +772,7 @@ function renderList() {
 const bkDay = iso => iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: TZ }) : '';
 const dueText = r => { const d = daysUntil(r.needed_date); return d < 0 ? `เลย ${-d} วัน` : d === 0 ? 'ใช้วันนี้' : `อีก ${d} วัน`; };
 function vendStat(r) {
+  if (r.unlock?.state === 'requested') return ['ขอปลดล็อก', true];
   if (anyFlag(r)) return ['แก้ไข: ' + flagSides(r).map(x => SIDE_LABEL[x]).join(', '), true];
   if (r.status === 'new') return ['รอรับทราบ', true];
   const v = (r.vendors || []).filter(x => x.name);
@@ -862,15 +924,17 @@ function renderTrash() {
 function renderUsers() {
   const rows = S.profiles;
   const n = r => rows.filter(p => p.role === r && p.active).length;
-  return `<div class="bar"><div class="callout" style="flex:1">เพิ่มเจ้าหน้าที่: ให้คนนั้นสมัครบัญชีจากหน้าเข้าสู่ระบบก่อน แล้วเปลี่ยนสิทธิ์เป็น "เจ้าหน้าที่จัดซื้อ" หรือ "เจ้าหน้าที่โมริริน" ที่ตารางนี้ ลบเจ้าหน้าที่: เปลี่ยนกลับเป็น "ผู้สั่ง" หรือระงับบัญชี</div></div>
+  return `<div class="bar"><div class="callout" style="flex:1">เพิ่มเจ้าหน้าที่: ให้คนนั้นสมัครบัญชีจากหน้าเข้าสู่ระบบก่อน แล้วเปลี่ยนสิทธิ์เป็น "เจ้าหน้าที่จัดซื้อ" หรือ "เจ้าหน้าที่โมริริน" ที่ตารางนี้ เบอร์โทรและ LINE ของเจ้าหน้าที่จะแสดงให้ผู้สั่งกดติดต่อตอนขอปลดล็อก ลบเจ้าหน้าที่: เปลี่ยนกลับเป็น "ผู้สั่ง" หรือระงับบัญชี</div></div>
   <p class="note">แอดมิน ${n('admin')} คน, เจ้าหน้าที่จัดซื้อ ${n('staff')} คน, เจ้าหน้าที่โมริริน ${n('moririn')} คน, ผู้สั่ง ${n('requester')} คน</p>
-  <div class="scroll"><table class="tbl"><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-นามสกุล</th><th>สาขา</th><th>สิทธิ์</th><th>ใช้งาน</th></tr></thead><tbody>
+  <div class="scroll"><table class="tbl"><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-นามสกุล</th><th>สาขา</th><th>สิทธิ์</th><th>เบอร์โทร</th><th>LINE ID / ลิงก์</th><th>ใช้งาน</th></tr></thead><tbody>
   ${rows.map(p => {
     const self = p.id === S.me.id;
     return `<tr><td>${esc(p.username)}</td>
       <td><input class="inp" data-uf="full_name" data-uid="${p.id}" value="${esc(p.full_name)}"></td>
       <td><select class="inp" data-uf="branch" data-uid="${p.id}"><option value=""></option>${CONFIG.BRANCHES.map(b => `<option ${p.branch === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></td>
       <td><select class="inp" data-uf="role" data-uid="${p.id}" ${self ? 'disabled title="เปลี่ยนสิทธิ์ตัวเองไม่ได้"' : ''}>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${p.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+      <td><input class="inp" data-uf="phone" data-uid="${p.id}" value="${esc(p.phone || '')}" inputmode="tel" placeholder="08x-xxx-xxxx" style="min-width:120px"></td>
+      <td><input class="inp" data-uf="line_id" data-uid="${p.id}" value="${esc(p.line_id || '')}" placeholder="LINE ID หรือลิงก์" style="min-width:140px"></td>
       <td><input type="checkbox" data-uf="active" data-uid="${p.id}" ${p.active ? 'checked' : ''} ${self ? 'disabled' : ''}></td></tr>`;
   }).join('')}
   </tbody></table></div>`;
@@ -878,11 +942,12 @@ function renderUsers() {
 document.addEventListener('change', async e => {
   const el = e.target; if (!el.dataset.uf) return;
   const val = el.type === 'checkbox' ? el.checked : el.value;
-  const { error } = await sb.from('profiles').update({ [el.dataset.uf]: val }).eq('id', el.dataset.uid);
+  const { error } = await sb.from('profiles').update({ [el.dataset.uf]: (typeof val === 'string' ? val.trim() || null : val) }).eq('id', el.dataset.uid);
   if (error) return toast('บันทึกไม่สำเร็จ: ' + error.message, 'err');
   const p = S.profiles.find(x => x.id === el.dataset.uid); if (p) p[el.dataset.uf] = val;
   toast('บันทึกแล้ว');
-  if (el.dataset.uf !== 'full_name') renderContent();
+  loadContacts();
+  if (!['full_name', 'phone', 'line_id'].includes(el.dataset.uf)) renderContent();
 });
 
 /* ======================= สร้างคำขอ ======================= */
@@ -899,23 +964,18 @@ function openCreate() {
       <label class="f"><span>แผนก</span><input class="inp" name="b" required maxlength="100"></label>
     </div>
     ${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l)).join('')}
-    <label class="f"><span>แนบไฟล์เอกสาร (ใบขอซื้อ รูปภาพ ใบเสนอราคา ฯลฯ)</span><input class="inp" type="file" id="fpick" multiple></label>
-    <div id="flist"></div>
+    <div class="f"><span class="lbl">แนบไฟล์เอกสาร (ใบขอซื้อ รูปภาพ ใบเสนอราคา ฯลฯ)</span>${fileAdder('+ แนบไฟล์')}<div id="flist"></div></div>
     <div class="foot"><button type="button" class="btn" data-act="close">ยกเลิก</button><button class="btn primary" id="cfBtn">ส่งคำขอ</button></div>
   </form>`);
   const tick = () => { const c = $('#clock'); if (!c) return clearInterval(clockTimer); c.textContent = 'วันเวลาที่แนบ: ' + new Date().toLocaleString('th-TH', { timeZone: TZ, dateStyle: 'full', timeStyle: 'medium' }) + ' น.'; };
   clearInterval(clockTimer); tick(); clockTimer = setInterval(tick, 1000);
   initLines($('#cf'));
-  $('#fpick').onchange = e => {
-    for (const f of e.target.files) {
-      if (f.size > CONFIG.MAX_FILE_MB * 1048576) { toast(`${f.name} ใหญ่เกิน ${CONFIG.MAX_FILE_MB} MB`, 'err'); continue; }
-      S.pendingFiles.push(f);
-    }
-    e.target.value = ''; drawPending();
-  };
+  bindFileAdder();
   $('#cf').onsubmit = submitCreate;
 }
 function drawPending() {
+  const b = document.querySelector('[data-act="pickFile"]'); if (b) b.textContent = S.pendingFiles.length ? '+ แนบไฟล์เพิ่ม' : b.dataset.label;
+  if (!$('#flist')) return;
   $('#flist').innerHTML = S.pendingFiles.map((f, i) => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size)}</small></div><button type="button" class="btn sm" data-act="unpick" data-i="${i}">เอาออก</button></div>`).join('');
 }
 async function uploadFiles(files) {
@@ -961,7 +1021,8 @@ function openDetail(id, keepVendors) {
   const d = daysUntil(r.needed_date);
   const dueTxt = r.status === 'done' ? '' : d < 0 ? ` (เลยกำหนด ${-d} วัน)` : d === 0 ? ' (วันนี้)' : ` (อีก ${d} วัน)`;
   const staffCan = isStaff() && !r.deleted_at;
-  const canOwner = r.requester_id === S.me.id && !r.deleted_at && r.status !== 'done' && !isAdmin();
+  const ownerActive = r.requester_id === S.me.id && !r.deleted_at && r.status !== 'done' && !isAdmin();
+  const canOwner = ownerActive && (r.status === 'new' || r.unlock?.state === 'unlocked');
   const mode = !r.deleted_at && (S.editMode === 'admin' && isAdmin() || S.editMode === 'owner' && canOwner) ? S.editMode : null;
 
   const info = mode ? editFormHtml(r, mode)
@@ -975,14 +1036,8 @@ function openDetail(id, keepVendors) {
       <div><span>รับทราบโดย</span>${r.acknowledged_by ? esc(r.acknowledged_by) + '<br><small>' + fmtDT(r.acknowledged_at) + '</small>' : '-'}</div>
       <div><span>เรียบร้อยโดย</span>${r.completed_by ? esc(r.completed_by) + '<br><small>' + fmtDT(r.completed_at) + '</small>' : '-'}</div>
     </div>
-    ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const a = itemsOf(r)[k]; return a.length ? `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map((x, i) => {
-      const d = daysUntil(x.date);
-      const due = r.status === 'done' || x.bought ? '' : d < 0 ? `, เลย ${-d} วัน` : d === 0 ? ', วันนี้' : `, อีก ${d} วัน`;
-      const mark = staffCan && r.status === 'pending'
-        ? `<label class="bchk"><input type="checkbox" data-act="toggleBought" data-id="${r.id}" data-g="${k}" data-i="${i}" ${x.bought ? 'checked' : ''}> ดำเนินการแล้ว</label>`
-        : x.bought ? '<span class="okb">✓ ดำเนินการแล้ว</span>' : '';
-      return `<li class="${x.bought ? 'bought' : ''}"><span class="it">${esc(x.text)}</span> <span class="note">ต้องการ ${fmtD(x.date)}${due}</span> ${mark}</li>`;
-    }).join('')}</ol></div>` : ''; }).join('')}
+    ${itemsHtml(r, staffCan)}
+    ${budgetHtml(r)}
     ${r.detail ? `<div class="sec"><h4>รายละเอียด</h4><div class="box">${esc(r.detail)}</div></div>` : ''}`;
 
   const files = (r.files || []).map(f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}, แนบโดย ${esc(f.uploaded_by || '-')} เมื่อ ${fmtDT(f.uploaded_at)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('') || '<p class="note">ไม่มีไฟล์แนบ</p>';
@@ -1033,9 +1088,10 @@ function openDetail(id, keepVendors) {
     if (staffCan && canDone() && r.status === 'pending') actions.push(`<button class="btn ok" data-act="done" data-id="${r.id}" ${anyFlag(r) ? 'disabled title="ต้องยืนยันการแก้ไขทุกฝั่งก่อน"' : ''}>เปลี่ยนเป็นเรียบร้อย</button>`);
     if (isAdmin() && r.status === 'done') actions.push(`<button class="btn" data-act="reopen" data-id="${r.id}">ย้อนกลับเป็นรอดำเนินการ</button>`);
     if (isAdmin() && !mode) left.push(`<button class="btn sm" data-act="edit" data-v="admin">แก้ไขข้อมูลคำขอ</button>`);
-    if (canOwner && !mode) left.push(`<button class="btn sm" data-act="edit" data-v="owner">แก้ไขใบงาน</button>`);
-    if (canOwner && r.status === 'new' && !mode) left.push(`<button class="btn sm danger" data-act="cancelReq" data-id="${r.id}">ยกเลิกใบงาน</button>`);
-    if (isAdmin()) left.push(`<label class="btn sm" style="cursor:pointer">+ แนบไฟล์เพิ่ม<input type="file" multiple id="addFiles" class="hidden"></label>`);
+    if (canOwner && !mode) left.push(`<button class="btn sm ${r.status === 'new' ? '' : 'primary'}" data-act="edit" data-v="owner">แก้ไขใบงาน</button>`);
+    if (ownerActive && r.status === 'pending' && !r.unlock && !mode) left.push(`<button class="btn sm" data-act="unlockForm" data-id="${r.id}">🔓 ขอปลดล็อกเพื่อแก้ไข</button>`);
+    if (ownerActive && r.status === 'new' && !mode) left.push(`<button class="btn sm danger" data-act="cancelReq" data-id="${r.id}">ยกเลิกใบงาน</button>`);
+    if ((isAdmin() || ownerActive) && !mode) left.push(`<label class="btn sm" style="cursor:pointer">+ แนบไฟล์เพิ่ม<input type="file" multiple id="addFiles" class="hidden"></label>`);
     if ((r.requester_id === S.me.id || isStaff()) && returnable(r).length && !mode) left.push(`<button class="btn sm" data-act="returnForm" data-id="${r.id}">คืนของ</button>`);
     if (isStaff()) left.push(`<button class="btn sm danger" data-act="trash" data-id="${r.id}">ย้ายลงถัง</button>`);
   } else {
@@ -1046,29 +1102,164 @@ function openDetail(id, keepVendors) {
   openModal(`
   <div class="sh-h"><div><span class="prno">${pr(r.id)}</span><h2>${esc(r.title)}</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
   <div class="sh-b">
+    ${unlockHtml(r)}
     ${alertHtml}
     ${info}
     <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${files}</div>
     <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
     ${returnsHtml(r)}
     ${histHtml}
-    ${!isStaff() && !mode ? `<p class="note" style="margin-top:16px">${canOwner ? (r.status === 'new' ? 'จัดซื้อยังไม่รับทราบ แก้ไขหรือยกเลิกได้อิสระ' : 'แก้ไขได้จนกว่างานจะเรียบร้อย ต้องระบุเหตุผล และบรรทัดที่ดำเนินการแล้วจะแก้ไม่ได้') : 'ใบงานนี้แก้ไขไม่ได้แล้ว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการเปลี่ยนแปลง'}</p>` : ''}
+    ${!isStaff() && !mode ? `<p class="note" style="margin-top:16px">${ownerActive ? (r.status === 'new' ? 'จัดซื้อยังไม่รับทราบ แก้ไขหรือยกเลิกได้อิสระ' : canOwner ? 'ได้รับการปลดล็อกแล้ว กด "แก้ไขใบงาน" เพื่อแก้ไข' : 'ใบงานถูกล็อกหลังจัดซื้อรับทราบ ถ้าต้องการแก้ไขให้กด "ขอปลดล็อกเพื่อแก้ไข" ส่วนการแนบไฟล์เพิ่มทำได้ตลอด') : 'ใบงานนี้แก้ไขไม่ได้แล้ว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการเปลี่ยนแปลง'}</p>` : ''}
     <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
   </div>`);
   if ($('#e_items')) initLines($('#e_items'));
+  if ($('#fpick')) { bindFileAdder(); drawPending(); }
   const af = $('#addFiles'); if (af) af.onchange = () => adminAddFiles(r.id, [...af.files]);
 }
+function itemsHtml(r, staffCan) {
+  return CONFIG.ITEM_GROUPS.map(([k, l]) => {
+    const a = itemsOf(r)[k]; if (!a.length) return '';
+    return `<div class="sec"><h4>${l} (${a.length})</h4><ol class="ilist">${a.map((x, i) => {
+      const d = daysUntil(x.date);
+      const due = r.status === 'done' || x.bought ? '' : d < 0 ? `, เลย ${-d} วัน` : d === 0 ? ', วันนี้' : `, อีก ${d} วัน`;
+      const rc = x.receipts || [];
+      const info = x.bought ? `<div class="doneinfo">✓ ดำเนินการแล้ว${x.price != null ? `, ราคา <b>${fmtB(x.price)}</b> บาท` : ''}${rc.length ? `, ใบเสร็จ ${rc.map((f, j) => `<a href="#" data-act="file" data-path="${esc(f.path)}">${rc.length > 1 ? 'ไฟล์ ' + (j + 1) : 'เปิดดู'}</a>`).join(' ')}` : ', ยังไม่มีใบเสร็จ'}${x.bought_by ? ` <span class="note">(${esc(x.bought_by)})</span>` : ''}</div>` : '';
+      const btn = staffCan && r.status === 'pending' ? `<button class="btn sm ${x.bought ? '' : 'ok'}" data-act="linePanel" data-id="${r.id}" data-g="${k}" data-i="${i}">${x.bought ? 'แก้ไขราคา / ใบเสร็จ' : 'ดำเนินการแล้ว'}</button>` : '';
+      return `<li class="${x.bought ? 'bought' : ''}"><div class="lirow"><span class="it">${esc(x.text)}</span><span class="note">ต้องการ ${fmtD(x.date)}${due}</span>${btn}</div>${info}</li>`;
+    }).join('')}</ol></div>`;
+  }).join('');
+}
+function budgetHtml(r) {
+  const b = budget(r); if (!b.priced && !b.refund) return '';
+  const done = r.status === 'done';
+  return `<div class="sec"><h4>สรุปงบประมาณ${done ? '' : ' (ถึงตอนนี้)'}</h4><div class="budget">
+    ${Object.entries(b.per).map(([g, v]) => `<div><span>${esc(groupLabel(g))}</span><b>${fmtB(v)}</b></div>`).join('')}
+    <div class="tot"><span>${done ? 'ใช้งบรวมทั้งหมด' : 'รวม'}${b.priced < b.all ? ` (ใส่ราคาแล้ว ${b.priced}/${b.all} รายการ)` : ''}</span><b>${fmtB(b.total)} บาท</b></div>
+    ${b.refund ? `<div><span>เงินคืนจากการคืนของ</span><b>-${fmtB(b.refund)}</b></div><div class="tot"><span>ใช้งบสุทธิ</span><b>${fmtB(b.net)} บาท</b></div>` : ''}
+  </div></div>`;
+}
+function contactsHtml(sides) {
+  const roles = new Set(['admin']);
+  (sides && sides.length ? sides : ['purchase', 'moririn']).forEach(x => roles.add(x === 'purchase' ? 'staff' : 'moririn'));
+  const ppl = S.contacts.filter(p => roles.has(p.role) && (p.phone || p.line_id));
+  if (!ppl.length) return `<p class="note">ยังไม่มีเบอร์ติดต่อเจ้าหน้าที่ในระบบ (แอดมินเพิ่มได้ที่แท็บผู้ใช้และสิทธิ์)</p>`;
+  return `<div class="contacts"><div class="note">ติดต่อเจ้าหน้าที่ได้ทันที</div>${ppl.map(p => `<div class="ct"><div><b>${esc(p.full_name)}</b><small>${ROLE[p.role]}</small></div>
+    ${p.phone ? `<a class="btn sm" href="tel:${esc(p.phone.replace(/[^0-9+]/g, ''))}">📞 ${esc(p.phone)}</a>` : ''}
+    ${p.line_id ? `<a class="btn sm line" href="${esc(lineUrl(p.line_id))}" target="_blank" rel="noopener">LINE</a>` : ''}</div>`).join('')}</div>`;
+}
+function unlockHtml(r) {
+  const u = r.unlock; if (!u || r.deleted_at) return '';
+  const sides = (u.sides || []).map(x => SIDE_LABEL[x]).join(' และ ');
+  const owner = r.requester_id === S.me.id;
+  const can = isAdmin() || (u.sides || []).some(x => mySides().includes(x));
+  if (u.state === 'requested') return `<div class="unlockbox"><b>🔓 ขอปลดล็อกเพื่อแก้ไขรายการ${sides}</b>
+    <div>เหตุผล: ${esc(u.reason)}</div><div class="note">ขอโดย ${esc(u.req_by)} เมื่อ ${fmtDT(u.req_at)}</div>
+    <div class="acts">${can ? `<button class="btn sm danger" data-act="unlockReject" data-id="${r.id}">ไม่อนุมัติ</button><button class="btn sm primary" data-act="unlockApprove" data-id="${r.id}">ปลดล็อกให้แก้ไข</button>` : ''}
+      ${owner && !can ? `<button class="btn sm" data-act="unlockCancel" data-id="${r.id}">ยกเลิกคำขอ</button>` : ''}</div>
+    ${owner ? contactsHtml(u.sides) : ''}</div>`;
+  return `<div class="unlockbox ok"><b>ปลดล็อกให้แก้ไขรายการ${sides}แล้ว</b> โดย ${esc(u.by)} เมื่อ ${fmtDT(u.at)}
+    <div>${owner ? 'กด "แก้ไขใบงาน" ด้านล่างเพื่อแก้ไข แก้ได้ 1 ครั้ง เมื่อบันทึกแล้วใบงานจะล็อกอีกครั้ง' : 'รอผู้สั่งแก้ไข'}</div>
+    ${can ? `<div class="acts"><button class="btn sm" data-act="relock" data-id="${r.id}">ล็อกกลับ</button></div>` : ''}</div>`;
+}
+function openUnlockForm(id) {
+  const r = S.rows.find(x => x.id === id); if (!r) return;
+  const it = itemsOf(r);
+  const avail = CONFIG.ITEM_GROUPS.filter(([k]) => it[k].length);
+  const groups = avail.length ? avail : CONFIG.ITEM_GROUPS;
+  const pre = groups.length === 1 ? [groups[0][0]] : [];
+  openModal(`
+  <div class="sh-h"><div><span class="prno">${pr(r.id)}</span><h2>ขอปลดล็อกเพื่อแก้ไข</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
+  <form class="sh-b" id="uf">
+    <p class="note" style="margin-top:0">ใบงานนี้จัดซื้อรับทราบแล้วจึงถูกล็อกไว้ เลือกส่วนที่ต้องการแก้ไขและบอกเหตุผล เจ้าหน้าที่ฝั่งนั้นจะได้รับแจ้งเตือนทันที</p>
+    <div class="f"><span class="lbl">ส่วนที่ต้องการแก้ไข</span>${groups.map(([k, l]) => `<label class="chk"><input type="checkbox" name="side" value="${k}" ${pre.includes(k) ? 'checked' : ''}> รายการ${l}</label>`).join('')}</div>
+    <label class="f"><span>เหตุผลที่ต้องการแก้ไข</span><textarea class="inp" name="reason" required placeholder="เช่น ขอเพิ่มกระดาษอีก 10 รีม"></textarea></label>
+    <div id="ucontacts">${contactsHtml(pre)}</div>
+    <div class="foot"><button type="button" class="btn" data-act="open" data-id="${r.id}">ย้อนกลับ</button><button class="btn primary" id="ufBtn">ส่งคำขอปลดล็อก</button></div>
+  </form>`);
+  const f = $('#uf');
+  const picked = () => [...f.querySelectorAll('[name=side]:checked')].map(x => x.value);
+  f.addEventListener('change', () => { $('#ucontacts').innerHTML = contactsHtml(picked()); });
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const sides = picked(), reason = f.reason.value.trim();
+    if (!sides.length) return toast('เลือกส่วนที่ต้องการแก้ไข', 'err');
+    if (!reason) return toast('กรุณาระบุเหตุผล', 'err');
+    $('#ufBtn').disabled = true;
+    if (await patch(r.id, { unlock: { state: 'requested', sides, reason } }, 'ส่งคำขอปลดล็อกแล้ว รอเจ้าหน้าที่อนุมัติ')) openDetail(r.id);
+    else $('#ufBtn').disabled = false;
+  };
+}
+function openLinePanel(id, g, i) {
+  const r = S.rows.find(x => x.id === id); if (!r) return;
+  const x = itemsOf(r)[g][i]; if (!x) return;
+  S.pendingFiles = [];
+  openModal(`
+  <div class="sh-h"><div><span class="prno">${pr(r.id)}</span><h2>${esc(x.text)}</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
+  <form class="sh-b" id="lp">
+    <p class="note" style="margin-top:0">รายการ${esc(groupLabel(g))}, ต้องการ ${fmtD(x.date)}</p>
+    <label class="f"><span>ราคา (บาท)</span><input class="inp" name="price" type="number" min="0" step="0.01" inputmode="decimal" required value="${x.price ?? ''}"></label>
+    <div class="f"><span class="lbl">ใบเสร็จ</span>${(x.receipts || []).map(fileRow).join('')}${fileAdder('+ แนบใบเสร็จ', 'image/*,.pdf')}<div id="flist"></div></div>
+    <div class="foot"><div class="left">${x.bought ? `<button type="button" class="btn sm danger" data-act="lineUndo" data-id="${r.id}" data-g="${g}" data-i="${i}">ยกเลิกดำเนินการแล้ว</button>` : ''}</div>
+      <button type="button" class="btn" data-act="open" data-id="${r.id}">ย้อนกลับ</button><button class="btn ok" id="lpBtn">บันทึกดำเนินการแล้ว</button></div>
+  </form>`);
+  bindFileAdder();
+  $('#lp').onsubmit = async e => {
+    e.preventDefault();
+    const price = parseFloat(e.target.price.value);
+    if (!(price >= 0)) return toast('ใส่ราคา (ใส่ 0 ได้ถ้าไม่มีค่าใช้จ่าย)', 'err');
+    const btn = $('#lpBtn'); btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+    let up = [];
+    try {
+      up = await uploadFiles(S.pendingFiles);
+      const arr = itemsOf(r)[g];
+      Object.assign(arr[i], { bought: true, bought_by: arr[i].bought_by || S.me.full_name, bought_at: arr[i].bought_at || now(), price, receipts: [...(arr[i].receipts || []), ...up] });
+      if (await patch(id, { items: { ...(r.items || {}), [g]: arr } }, 'บันทึกดำเนินการแล้ว')) { openDetail(id, true); return; }
+    } catch (x2) { toast(x2.message, 'err'); }
+    if (up.length) sb.storage.from(CONFIG.BUCKET).remove(up.map(f => f.path)).catch(() => {});
+    btn.disabled = false; btn.textContent = 'บันทึกดำเนินการแล้ว';
+  };
+}
+function openRefundForm(rid) {
+  const t = S.returns.find(x => x.id === rid); if (!t) return;
+  S.pendingFiles = [];
+  openModal(`
+  <div class="sh-h"><div><span class="prno">${rtNo(t.id)}</span><h2>สลิปโอนเงินคืนบริษัท</h2></div><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
+  <form class="sh-b" id="rff">
+    <p class="note" style="margin-top:0">ใบงาน ${pr(t.request_id)}, คืนโดย ${esc(t.returner_name)}</p>
+    <label class="f"><span>ยอดเงินที่โอนคืน (บาท)</span><input class="inp" type="number" name="amt" min="0" step="0.01" inputmode="decimal" value="${t.refund_amount ?? ''}"></label>
+    <div class="f"><span class="lbl">สลิปโอนเงิน</span>${(t.refund_slips || []).map(fileRow).join('')}${fileAdder('+ แนบสลิป', 'image/*,.pdf')}<div id="flist"></div></div>
+    <div class="foot"><button type="button" class="btn" data-act="open" data-id="${t.request_id}">ย้อนกลับ</button><button class="btn primary" id="rffBtn">บันทึก</button></div>
+  </form>`);
+  bindFileAdder();
+  $('#rff').onsubmit = async e => {
+    e.preventDefault();
+    const v = e.target.amt.value.trim(), amt = v === '' ? null : parseFloat(v);
+    if (amt !== null && !(amt >= 0)) return toast('ยอดเงินไม่ถูกต้อง', 'err');
+    const btn = $('#rffBtn'); btn.disabled = true;
+    let up = [];
+    try {
+      up = await uploadFiles(S.pendingFiles);
+      const { data, error } = await sb.from('returns').update({ refund_amount: amt, refund_slips: [...(t.refund_slips || []), ...up] }).eq('id', t.id).select().single();
+      if (error) throw new Error(error.message);
+      Object.assign(t, data); toast('บันทึกสลิปเงินคืนแล้ว');
+      renderContent(); openDetail(t.request_id, true); return;
+    } catch (x) { toast(x.message, 'err'); }
+    if (up.length) sb.storage.from(CONFIG.BUCKET).remove(up.map(f => f.path)).catch(() => {});
+    btn.disabled = false;
+  };
+}
 function editFormHtml(r, mode) {
-  const owner = mode === 'owner', needReason = owner && r.status !== 'new';
+  const owner = mode === 'owner', afterAck = owner && r.status !== 'new';
+  const okSides = afterAck ? (r.unlock?.sides || []) : CONFIG.ITEM_GROUPS.map(([k]) => k);
   return `
-    ${needReason ? `<div class="callout" style="margin:12px 0">จัดซื้อรับทราบงานนี้แล้ว การแก้ไขจะแจ้งเตือนเจ้าหน้าที่ฝั่งที่เกี่ยวข้องทันที และบรรทัดที่ดำเนินการแล้วจะถูกล็อกไว้</div>` : ''}
+    ${afterAck ? `<div class="callout" style="margin:12px 0">ได้รับการปลดล็อกให้แก้ไขรายการ${okSides.map(x => SIDE_LABEL[x]).join(' และ ')} แก้ได้ 1 ครั้ง เมื่อบันทึกแล้วใบงานจะล็อกอีกครั้งและแจ้งเตือนเจ้าหน้าที่ บรรทัดที่ดำเนินการแล้วแก้ไม่ได้</div>` : ''}
     <div class="grid2">
       <label class="f"><span>ชื่องาน</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
       <label class="f"><span>แผนก</span><input class="inp" id="e_b" value="${esc(r.branch)}"></label>
     </div>
-    <div id="e_items">${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l, itemsOf(r)[k], owner)).join('')}</div>
-    ${owner ? `<label class="f"><span>แนบไฟล์เพิ่ม (ไฟล์เดิมลบไม่ได้)</span><input class="inp" type="file" id="e_files" multiple></label>` : ''}
-    <label class="f"><span>เหตุผลที่แก้ไข${needReason ? ' (จำเป็น)' : ' (ถ้ามี)'}</span><textarea class="inp" id="e_reason" style="min-height:60px" placeholder="เช่น ลดจาก 20 เหลือ 10 รีม เพราะยังมีของเหลือ"></textarea></label>
+    <div id="e_items">${CONFIG.ITEM_GROUPS.map(([k, l]) => linesBlock(k, l, itemsOf(r)[k], owner, owner && !okSides.includes(k))).join('')}</div>
+    ${owner ? `<div class="f"><span class="lbl">แนบไฟล์เพิ่ม (ไฟล์เดิมลบไม่ได้)</span>${fileAdder('+ แนบไฟล์')}<div id="flist"></div></div>` : ''}
+    <label class="f"><span>เหตุผลที่แก้ไข (ถ้ามี)</span><textarea class="inp" id="e_reason" style="min-height:60px" placeholder="${afterAck ? 'ถ้าไม่ใส่ จะใช้เหตุผลตอนขอปลดล็อก' : 'เช่น ลดจาก 20 เหลือ 10 รีม'}"></textarea></label>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="edit">ยกเลิกแก้ไข</button><button class="btn dark" data-act="editSave" data-id="${r.id}">บันทึกการแก้ไข</button></div>`;
 }
 /* ======================= คืนของ ======================= */
@@ -1080,10 +1271,14 @@ function returnsHtml(r) {
       <small class="note">คืนโดย ${esc(t.returner_name)} เมื่อ ${fmtDT(t.created_at)}${t.status === 'received' ? `, รับคืนโดย ${esc(t.received_by)} เมื่อ ${fmtDT(t.received_at)}` : ''}</small>
       <ol class="ilist">${(t.items || []).map(x => `<li>${esc(x.text)} <b>${esc(x.qty)} ${esc(x.unit || '')}</b> <span class="note">(${esc(groupLabel(x.group))})</span></li>`).join('')}</ol>
       ${t.note ? `<div class="box" style="margin-top:6px">${esc(t.note)}</div>` : ''}
+      ${t.status === 'received' ? `<div class="refund">${t.refund_amount != null || (t.refund_slips || []).length
+        ? `💸 เงินคืนบริษัท <b>${t.refund_amount != null ? fmtB(t.refund_amount) + ' บาท' : '-'}</b>${(t.refund_slips || []).map((f, j) => ` <a href="#" data-act="file" data-path="${esc(f.path)}">สลิป ${j + 1}</a>`).join('')}${t.refund_by ? ` <span class="note">(${esc(t.refund_by)}, ${fmtDT(t.refund_at)})</span>` : ''}`
+        : '<span class="note">ยังไม่ได้แนบสลิปโอนเงินคืน</span>'}</div>` : ''}
       ${(t.files || []).map(f => `<div class="file" style="margin-top:6px"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}</small></div><button class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`).join('')}
       <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
         ${t.status === 'pending' && t.requester_id === S.me.id ? `<button class="btn sm danger" data-act="retCancel" data-rid="${t.id}">ยกเลิกการคืน</button>` : ''}
         ${t.status === 'pending' && isStaff() ? `<button class="btn sm ok" data-act="retConfirm" data-rid="${t.id}">ยืนยันรับคืน</button>` : ''}
+        ${t.status === 'received' && isStaff() ? `<button class="btn sm" data-act="refundForm" data-rid="${t.id}">${t.refund_amount != null || (t.refund_slips || []).length ? 'แก้ไขสลิปเงินคืน' : 'แนบสลิปเงินคืน'}</button>` : ''}
         ${t.status === 'received' && isStaff() ? `<button class="btn sm dark" data-act="retPrint" data-rid="${t.id}">พิมพ์ใบคืนของ</button>` : ''}
       </div>
     </div>`).join('')}</div>`;
@@ -1104,8 +1299,7 @@ function openReturnForm(id) {
         <input class="inp rq" type="number" min="0" step="any" inputmode="decimal" placeholder="จำนวน" disabled>
         <input class="inp ru" placeholder="หน่วย" maxlength="30" disabled></div>`).join('')}</div>`).join('')}
     <label class="f"><span>เหตุผล / หมายเหตุ</span><textarea class="inp" name="note" style="min-height:60px" placeholder="เช่น ใช้ไม่หมด เหลือ 5 รีม"></textarea></label>
-    <label class="f"><span>แนบรูปหรือไฟล์ของที่คืน</span><input class="inp" type="file" id="fpick" multiple accept="image/*,.pdf"></label>
-    <div id="flist"></div>
+    <div class="f"><span class="lbl">แนบรูปหรือไฟล์ของที่คืน</span>${fileAdder('+ แนบไฟล์', 'image/*,.pdf')}<div id="flist"></div></div>
     <div class="foot"><button type="button" class="btn" data-act="open" data-id="${r.id}">ย้อนกลับ</button><button class="btn primary" id="rfBtn">ส่งคืนของ</button></div>
   </form>`);
   startClock('วันเวลาที่คืน');
@@ -1116,10 +1310,7 @@ function openReturnForm(id) {
     row.querySelectorAll('.rq, .ru').forEach(i => i.disabled = !on);
     if (on) row.querySelector('.rq').focus();
   });
-  $('#fpick').onchange = e => {
-    for (const x of e.target.files) { if (x.size > CONFIG.MAX_FILE_MB * 1048576) { toast(`${x.name} ใหญ่เกิน ${CONFIG.MAX_FILE_MB} MB`, 'err'); continue; } S.pendingFiles.push(x); }
-    e.target.value = ''; drawPending();
-  };
+  bindFileAdder();
   f.onsubmit = async e => {
     e.preventDefault();
     const items = [];
@@ -1252,7 +1443,8 @@ function exportExcel() {
       'แก้ไขแล้ว (ครั้ง)': (r.edit_log || []).filter(e => e.kind === 'edit').length,
       'การแก้ไขรอยืนยัน': flagSides(r).map(x => SIDE_LABEL[x]).join(', '),
       'ประวัติการแก้ไข': (r.edit_log || []).map(e => e.kind === 'ack' ? `${bk(e.at)} รับทราบโดย ${e.by}` : `${bk(e.at)} แก้โดย ${e.by}: ${(e.changes || []).map(c => c.from === undefined ? `${c.field} ${c.to}` : `${c.field} จาก "${c.from ?? ''}" เป็น "${c.to ?? ''}"`).join('; ')}`).join('\n'),
-      'การคืนของ': returnsOf(r.id).map(t => `${rtNo(t.id)} ${t.status === 'received' ? 'รับคืนแล้ว' : 'รอรับคืน'}: ${(t.items || []).map(x => `${x.text} ${x.qty} ${x.unit || ''}`.trim()).join(', ')}`).join('\n'),
+      'งบรวม (บาท)': budget(r).total, 'เงินคืน (บาท)': budget(r).refund, 'งบสุทธิ (บาท)': budget(r).net,
+      'การคืนของ': returnsOf(r.id).map(t => `${rtNo(t.id)} ${t.status === 'received' ? 'รับคืนแล้ว' : 'รอรับคืน'}: ${(t.items || []).map(x => `${x.text} ${x.qty} ${x.unit || ''}`.trim()).join(', ')}${t.refund_amount != null ? `, เงินคืน ${fmtB(t.refund_amount)} บาท` : ''}`).join('\n'),
       'จำนวนไฟล์': (r.files || []).length, 'ชื่อไฟล์': (r.files || []).map(f => f.name).join(', '),
     };
     if (inTrash) { o['ลบเมื่อ'] = bk(r.deleted_at); o['ลบโดย'] = r.deleted_by || ''; }
@@ -1281,6 +1473,21 @@ const A = {
   lineDel: el => { const row = el.closest('.line'), box = row.parentElement; if (box.children.length > 1) row.remove(); else { row.querySelector('.lt').value = ''; row.querySelector('.ld').value = ''; } renumber(box); },
   testNotify: () => { ensureAudio(); testNotify(); },
   returnForm: (el, id) => openReturnForm(id),
+  pickFile: () => $('#fpick')?.click(),
+  unlockForm: (el, id) => openUnlockForm(id),
+  unlockApprove: async (el, id) => { if (await patch(id, { unlock: { state: 'unlocked' } }, 'ปลดล็อกแล้ว ผู้สั่งแก้ไขได้ 1 ครั้ง')) openDetail(id, true); },
+  unlockReject: async (el, id) => { if (!confirm('ไม่อนุมัติคำขอปลดล็อกนี้?')) return; if (await patch(id, { unlock: null }, 'ไม่อนุมัติคำขอปลดล็อกแล้ว')) openDetail(id, true); },
+  unlockCancel: async (el, id) => { if (await patch(id, { unlock: null }, 'ยกเลิกคำขอปลดล็อกแล้ว')) openDetail(id, true); },
+  relock: async (el, id) => { if (!confirm('ล็อกใบงานกลับ? ผู้สั่งจะแก้ไขไม่ได้จนกว่าจะขอปลดล็อกใหม่')) return; if (await patch(id, { unlock: null }, 'ล็อกกลับแล้ว')) openDetail(id, true); },
+  linePanel: (el, id) => openLinePanel(id, el.dataset.g, +el.dataset.i),
+  lineUndo: async (el, id) => {
+    if (!confirm('ยกเลิกสถานะดำเนินการแล้วของบรรทัดนี้? ราคาและใบเสร็จของบรรทัดนี้จะถูกนำออก')) return;
+    const r = S.rows.find(x => x.id === id), g = el.dataset.g, i = +el.dataset.i, arr = itemsOf(r)[g];
+    ['bought', 'bought_by', 'bought_at', 'price', 'receipts'].forEach(k => delete arr[i][k]);
+    if (await patch(id, { items: { ...(r.items || {}), [g]: arr } }, 'ยกเลิกสถานะดำเนินการแล้ว')) openDetail(id, true);
+  },
+  refundForm: el => openRefundForm(+el.dataset.rid),
+
   retConfirm: async el => {
     const t = S.returns.find(x => x.id === +el.dataset.rid); if (!t) return;
     if (!confirm(`ยืนยันว่าได้รับของคืนตาม ${rtNo(t.id)} ครบแล้ว?`)) return;
@@ -1341,13 +1548,14 @@ const A = {
     const r = S.rows.find(x => x.id === id);
     if (anyFlag(r)) return toast('มีการแก้ไขที่ยังไม่ได้ยืนยัน (' + flagSides(r).map(x => SIDE_LABEL[x]).join(', ') + ') ต้องยืนยันก่อน', 'err');
     const changed = JSON.stringify(S.editVendors.filter(v => v.name)) !== JSON.stringify(r.vendors || []);
-    if (!confirm(`ยืนยันเปลี่ยน ${pr(id)} เป็น "เรียบร้อย"?`)) return;
+    const pend = Object.values(itemsOf(r)).flat().filter(x => !x.bought).length;
+    if (!confirm(`ยืนยันเปลี่ยน ${pr(id)} เป็น "เรียบร้อย"?${pend ? `\n\nยังมี ${pend} บรรทัดที่ยังไม่ได้กดดำเนินการแล้ว (ไม่มีราคา)` : ''}\nใช้งบรวม ${fmtB(budget(r).total)} บาท`)) return;
     const fields = { status: 'done', completed_by: S.me.full_name, completed_at: now() };
     if (changed) fields.vendors = S.editVendors.filter(v => v.name);
     if (await patch(id, fields, 'เปลี่ยนเป็นเรียบร้อยแล้ว')) closeModal();
   },
   reopen: async (el, id) => { if (await patch(id, { status: 'pending', completed_by: null, completed_at: null }, 'ย้อนกลับเป็นรอดำเนินการแล้ว')) openDetail(id); },
-  edit: el => { S.editMode = S.editMode ? null : (el.dataset.v || null); openDetail(S.modalId, true); },
+  edit: el => { S.editMode = S.editMode ? null : (el.dataset.v || null); S.pendingFiles = []; openDetail(S.modalId, true); },
   editSave: async (el, id) => {
     const r = S.rows.find(x => x.id === id), owner = S.editMode === 'owner';
     const t = $('#e_title').value.trim(); if (!t) return toast('ใส่ชื่องานก่อนบันทึก', 'err');
@@ -1355,8 +1563,7 @@ const A = {
     if (!count) return toast('ต้องมีรายการอย่างน้อย 1 บรรทัด', 'err');
     if (missing) return toast('ใส่วันที่ต้องการใช้ให้ครบทุกบรรทัด', 'err');
     const reason = $('#e_reason').value.trim();
-    if (owner && r.status !== 'new' && !reason) return toast('กรุณาระบุเหตุผลที่แก้ไข', 'err');
-    const picked = owner ? [...($('#e_files')?.files || [])].filter(f => f.size <= CONFIG.MAX_FILE_MB * 1048576) : [];
+    const picked = owner ? S.pendingFiles : [];
     el.disabled = true; el.textContent = 'กำลังบันทึก...';
     let up = [];
     try {
