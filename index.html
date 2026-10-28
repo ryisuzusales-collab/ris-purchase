@@ -249,6 +249,13 @@ a.btn{text-decoration:none;display:inline-block}
 .rcl{display:flex;gap:8px;align-items:center;cursor:pointer;min-width:0}
 .rcl span{overflow:hidden;text-overflow:ellipsis}
 @media (max-width:640px){.rrow{grid-template-columns:1fr 1fr}.rcl{grid-column:1 / -1}}
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+.seg label{flex:1;min-width:130px;cursor:pointer}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;text-align:center;padding:12px 10px;border:2px solid var(--line);border-radius:10px;font-weight:600;background:var(--surface)}
+.seg input:checked+span{border-color:var(--red);background:var(--red-bg);color:var(--red)}
+.seg input:focus-visible+span{outline:2px solid var(--blue);outline-offset:2px}
+.site{font-size:12px;font-weight:600;background:var(--ink);color:var(--paper);border-radius:5px;padding:1px 7px}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -274,7 +281,8 @@ const CONFIG = {
   SUPABASE_ANON_KEY: 'sb_publishable_WdCOu73wY1xQuM70rs6NbA_vDNO5_0-',   // Publishable key
   EMAIL_DOMAIN: 'purchase.local',      // ใช้แปลง "ชื่อผู้ใช้" เป็นอีเมลภายใน ไม่มีการส่งเมลจริง
   BUCKET: 'purchase-files',
-  BRANCHES: ['สำนักงานใหญ่','สาขา 2','สาขา 3','สาขา 4','สาขา 5','สาขา 6','สาขา 7','สาขา 8','สาขา 9'],
+  BRANCHES: ['สำนักงานใหญ่','ปลวกแดง],
+  SITES: ['สำนักงานใหญ่', 'ปลวกแดง'],   // สาขาของใบงาน
   ITEM_GROUPS: [['purchase', 'จัดซื้อ'], ['moririn', 'โมริริน']],
   COMPANY_NAME: '',   // ชื่อบริษัทที่จะพิมพ์บนหัวใบคืนของ (เว้นว่างได้)
   MAX_FILE_MB: 50,
@@ -292,7 +300,7 @@ const fmtDT = iso => iso ? new Date(iso).toLocaleString('th-TH', { timeZone: TZ,
 const fmtD = ymd => { if (!ymd) return '-'; const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }); };
 const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 const STATUS = { new: 'งานใหม่', pending: 'รอดำเนินการ', done: 'เรียบร้อย' };
-const ROLE = { requester: 'ผู้สั่ง', staff: 'เจ้าหน้าที่จัดซื้อ', moririn: 'เจ้าหน้าที่โมริริน', admin: 'แอดมินหลัก' };
+const ROLE = { requester: 'ผู้สั่ง', staff: 'เจ้าหน้าที่จัดซื้อ', moririn: 'เจ้าหน้าที่โมริริน', accounting: 'บัญชี / การเงิน', admin: 'แอดมินหลัก' };
 
 function toast(msg, kind = '') {
   const t = document.createElement('div');
@@ -361,19 +369,21 @@ async function testNotify() {
 /* ======================= สถานะแอป ======================= */
 let sb;
 const S = {
-  returns: [], contacts: [],
+  returns: [], contacts: [], site: '',
   user: null, me: null, rows: [], profiles: [],
   view: 'list', filter: 'open', q: '', type: '', calMonth: null,
   pendingFiles: [], modalId: null, editVendors: null, editMode: null,
 };
 const isStaff = () => S.me && ['staff', 'moririn', 'admin'].includes(S.me.role);
+const isAcct = () => S.me?.role === 'accounting';   // ดูและพิมพ์งานที่เรียบร้อยแล้วอย่างเดียว
+const siteOk = r => !S.site || r.site === S.site;
 const canDone = () => S.me && ['staff', 'admin'].includes(S.me.role);   // เปลี่ยนเป็นเรียบร้อย: เฉพาะจัดซื้อและแอดมิน
 const SIDE_LABEL = { purchase: 'จัดซื้อ', moririn: 'โมริริน' };
 const mySides = () => !S.me ? [] : S.me.role === 'admin' ? ['purchase', 'moririn'] : S.me.role === 'staff' ? ['purchase'] : S.me.role === 'moririn' ? ['moririn'] : [];
 const flagSides = r => [r.edit_flag && 'purchase', r.edit_flag_m && 'moririn'].filter(Boolean);
 const anyFlag = r => !!(r.edit_flag || r.edit_flag_m);
 const isAdmin = () => S.me && S.me.role === 'admin';
-const live = () => S.rows.filter(r => !r.deleted_at);
+const live = () => isAcct() ? S.rows.slice() : S.rows.filter(r => !r.deleted_at);
 const itemsOf = r => {
   const it = r.items || {}, o = {};
   CONFIG.ITEM_GROUPS.forEach(([k]) => o[k] = (it[k] || [])
@@ -534,6 +544,7 @@ async function enter() {
   S.me = data;
   S.calMonth = new Date(); S.calMonth.setDate(1);
   S.view = isStaff() ? 'today' : 'list';
+  if (isAcct()) S.filter = 'all';
   if (isStaff()) { try { await sb.rpc('auto_trash_done'); } catch {} }
   await loadAll();
   renderShell();
@@ -645,7 +656,7 @@ function subscribe() {
 
 /* ======================= โครงหน้า ======================= */
 function renderShell() {
-  const tabs = [['list', 'รายการ'], ['cal', 'ปฏิทิน']];
+  const tabs = isAcct() ? [['list', 'รายการเรียบร้อย']] : [['list', 'รายการ'], ['cal', 'ปฏิทิน']];
   if (isStaff()) tabs.unshift(['today', 'สรุปวันนี้']);
   if (isStaff()) tabs.push(['trash', 'ถังขยะ']);
   if (isAdmin()) tabs.push(['users', 'ผู้ใช้และสิทธิ์']);
@@ -685,8 +696,9 @@ function filtered(base) {
       if (S.filter === 'attn' && !attnAny(r)) return false;
     }
     if (S.type && r.req_type !== S.type) return false;
+    if (!siteOk(r)) return false;
     if (q) {
-      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, ...Object.values(itemsOf(r)).flat().map(x => x.text), ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
+      const hay = [pr(r.id), r.title, r.detail, r.requester_name, r.branch, r.site, ...Object.values(itemsOf(r)).flat().map(x => x.text), ...(r.vendors || []).map(v => v.name)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -701,16 +713,19 @@ function sortUrgent(list) {
   });
 }
 
+const siteSelect = () => `<select class="sel" id="siteSel" aria-label="สาขา"><option value="">ทุกสาขา</option>${CONFIG.SITES.map(x => `<option ${S.site === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`;
 function toolbar(withStatus) {
+  if (isAcct()) withStatus = false;
   const counts = { open: 0, new: 0, pending: 0, done: 0, all: 0, attn: 0 };
   live().forEach(r => { counts.all++; counts[r.status]++; if (r.status !== 'done') counts.open++; if (attnAny(r)) counts.attn++; });
   const chips = [['open', 'ยังไม่เสร็จ'], ['new', 'งานใหม่'], ['pending', 'รอดำเนินการ'], ['done', 'เรียบร้อย'], ['all', 'ทั้งหมด']];
   if (isStaff()) chips.unshift(['attn', 'รอยืนยัน']);
   return `<div class="bar">
     ${withStatus ? `<div class="chips">${chips.map(([k, l]) => `<button class="chip ${S.filter === k ? 'on' : ''}" data-act="filter" data-v="${k}">${l} ${counts[k]}</button>`).join('')}</div>` : ''}
+    ${siteSelect()}
     <input class="search" id="q" placeholder="ค้นหาเลขที่ ชื่องาน แผนก รายการ ผู้สั่ง ร้าน" value="${esc(S.q)}">
     <button class="btn" data-act="export">ส่งออก Excel</button>
-    ${S.view !== 'trash' ? `<button class="btn primary" data-act="create">+ สร้างคำขอ</button>` : ''}
+    ${S.view !== 'trash' && !isAcct() ? `<button class="btn primary" data-act="create">+ สร้างคำขอ</button>` : ''}
   </div>`;
 }
 
@@ -727,6 +742,7 @@ function renderContent() {
     q.oninput = () => { S.q = q.value; if (S.view === 'list') renderList(); else { renderContent(); } };
     if (focusQ) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
   }
+  const ss = $('#siteSel'); if (ss) ss.onchange = () => { S.site = ss.value; renderContent(); };
   const ts = $('#typeSel'); if (ts) ts.onchange = () => { S.type = ts.value; renderContent(); };
 }
 
@@ -744,7 +760,7 @@ function ticket(r) {
   return `<div class="ticket ${cls} ${anyFlag(r) ? 'edited' : ''}" role="button" tabindex="0" data-act="open" data-id="${r.id}">
     <div class="due"><b>${big}</b><span>${small}</span></div>
     <div class="tb">
-      <div class="r1"><span class="prno">${pr(r.id)}</span><span class="type">${esc(r.branch || '')}</span>
+      <div class="r1">${r.site ? `<span class="site">${esc(r.site)}</span>` : ''}<span class="prno">${pr(r.id)}</span><span class="type">${esc(r.branch || '')}</span>
         ${r.status === 'new' ? '<span class="new-dot" title="ยังไม่มีเจ้าหน้าที่รับทราบ"></span>' : ''}
         ${anyFlag(r) ? `<span class="badge s-edit">แก้ไข: ${flagSides(r).map(x => SIDE_LABEL[x]).join(', ')}</span>` : ''}
         ${hasPendRet(r) ? '<span class="badge s-ret">มีของคืนรอรับ</span>' : ''}
@@ -781,7 +797,7 @@ function vendStat(r) {
 }
 function buildToday() {
   const t = todayYMD();
-  const open = live().filter(r => r.status !== 'done')
+  const open = live().filter(r => r.status !== 'done' && siteOk(r))
     .sort((a, b) => a.needed_date.localeCompare(b.needed_date) || a.created_at.localeCompare(b.created_at));
   const pick = f => open.filter(f);
   const dd = r => daysUntil(r.needed_date);
@@ -813,7 +829,7 @@ function buildToday() {
     inToday: live().filter(r => bkDay(r.created_at) === t).length,
     doneToday: S.rows.filter(r => r.status === 'done' && bkDay(r.completed_at) === t).length,
   };
-  const retReq = live().filter(hasPendRet);
+  const retReq = live().filter(r => hasPendRet(r) && siteOk(r));
   if (retReq.length) groups.splice(1, 0, { cls: 'g-attn', title: 'รอรับคืนของ', hint: 'ผู้สั่งส่งของคืน ตรวจของแล้วกดยืนยันรับคืนในใบงาน', items: retReq });
   return { groups, shops, noVendor, stats };
 }
@@ -840,7 +856,8 @@ function renderToday() {
       ${noVendor.length ? `<div class="shop"><h5>ยังไม่ได้ระบุร้าน<small>เปิดงานแล้วเพิ่มร้านหรือบุคคล เพื่อให้เข้าแผน</small></h5>
         <ul>${noVendor.map(r => `<li data-act="open" data-id="${r.id}">${pr(r.id)} ${esc(r.title)} <span class="note">(${dueText(r)})</span></li>`).join('')}</ul></div>` : ''}
     </section>` : '';
-  return `<div class="today-h"><h2>${dateTxt}</h2>
+  return `<div class="today-h"><h2>${dateTxt}${S.site ? ` <span class="note">(${esc(S.site)})</span>` : ''}</h2>
+      ${siteSelect()}
       <button class="btn" data-act="testNotify">ทดสอบแจ้งเตือน</button>
       <button class="btn" data-act="copySummary">คัดลอกสรุปส่ง LINE</button>
       <button class="btn primary" data-act="create">+ สร้างคำขอ</button></div>
@@ -856,13 +873,13 @@ function renderToday() {
 }
 function summaryText() {
   const { groups, shops, noVendor, stats } = buildToday();
-  const L = [`สรุประบบรับใบงาน_จัดซื้อ ${new Date().toLocaleDateString('th-TH', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'short', year: '2-digit' })}`,
+  const L = [`สรุประบบรับใบงาน_จัดซื้อ${S.site ? ' (' + S.site + ')' : ''} ${new Date().toLocaleDateString('th-TH', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'short', year: '2-digit' })}`,
     `งานค้าง ${stats.open} งาน, เลยกำหนด ${stats.over}, ต้องใช้วันนี้ ${stats.today}, รับเข้าวันนี้ ${stats.inToday}, ปิดงานวันนี้ ${stats.doneToday}`];
   let n = 0;
   groups.forEach(g => {
     if (!g.items.length) return;
     L.push('', `${++n}. ${g.title} (${g.items.length})`);
-    g.items.forEach(r => L.push(`- ${pr(r.id)} ${r.title} [${dueText(r)}] ${r.requester_name || ''}${r.branch ? ' / ' + r.branch : ''}`));
+    g.items.forEach(r => L.push(`- ${pr(r.id)}${r.site ? ' [' + r.site + ']' : ''} ${r.title} [${dueText(r)}] ${r.requester_name || ''}${r.branch ? ' / ' + r.branch : ''}`));
   });
   if (shops.length) {
     L.push('', 'แผนออกซื้อ / ติดต่อ');
@@ -925,7 +942,7 @@ function renderUsers() {
   const rows = S.profiles;
   const n = r => rows.filter(p => p.role === r && p.active).length;
   return `<div class="bar"><div class="callout" style="flex:1">เพิ่มเจ้าหน้าที่: ให้คนนั้นสมัครบัญชีจากหน้าเข้าสู่ระบบก่อน แล้วเปลี่ยนสิทธิ์เป็น "เจ้าหน้าที่จัดซื้อ" หรือ "เจ้าหน้าที่โมริริน" ที่ตารางนี้ เบอร์โทรและ LINE ของเจ้าหน้าที่จะแสดงให้ผู้สั่งกดติดต่อตอนขอปลดล็อก ลบเจ้าหน้าที่: เปลี่ยนกลับเป็น "ผู้สั่ง" หรือระงับบัญชี</div></div>
-  <p class="note">แอดมิน ${n('admin')} คน, เจ้าหน้าที่จัดซื้อ ${n('staff')} คน, เจ้าหน้าที่โมริริน ${n('moririn')} คน, ผู้สั่ง ${n('requester')} คน</p>
+  <p class="note">แอดมิน ${n('admin')} คน, เจ้าหน้าที่จัดซื้อ ${n('staff')} คน, เจ้าหน้าที่โมริริน ${n('moririn')} คน, บัญชี / การเงิน ${n('accounting')} คน, ผู้สั่ง ${n('requester')} คน</p>
   <div class="scroll"><table class="tbl"><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-นามสกุล</th><th>สาขา</th><th>สิทธิ์</th><th>เบอร์โทร</th><th>LINE ID / ลิงก์</th><th>ใช้งาน</th></tr></thead><tbody>
   ${rows.map(p => {
     const self = p.id === S.me.id;
@@ -959,6 +976,7 @@ function openCreate() {
   <div class="sh-h"><h2>สร้างคำขอใหม่</h2><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
   <form class="sh-b" id="cf">
     <div class="clock" id="clock"></div>
+    <div class="f"><span class="lbl">สาขาของงานนี้</span><div class="seg">${CONFIG.SITES.map(x => `<label><input type="radio" name="site" value="${esc(x)}" required><span>${esc(x)}</span></label>`).join('')}</div></div>
     <div class="grid2" style="margin-top:0">
       <label class="f"><span>ชื่องาน</span><input class="inp" name="title" required maxlength="200"></label>
       <label class="f"><span>แผนก</span><input class="inp" name="b" required maxlength="100"></label>
@@ -992,6 +1010,8 @@ async function uploadFiles(files) {
 async function submitCreate(e) {
   e.preventDefault();
   const f = e.target, btn = $('#cfBtn');
+  const site = f.querySelector('[name=site]:checked')?.value;
+  if (!site) return toast('เลือกสาขาของงานก่อน', 'err');
   const { items, count, missing, earliest } = readLines(f);
   if (!count) return toast('กรอกรายการจัดซื้อหรือโมริรินอย่างน้อย 1 บรรทัด', 'err');
   if (missing) return toast(`ใส่วันที่ต้องการใช้ให้ครบทุกบรรทัด (ขาด ${missing} บรรทัด)`, 'err');
@@ -1001,7 +1021,7 @@ async function submitCreate(e) {
   try {
     files = await uploadFiles(S.pendingFiles);
     const { error } = await sb.from('requests').insert({
-      req_type: 'ใบงาน', branch: f.b.value.trim(), title: f.title.value.trim(), items,
+      req_type: 'ใบงาน', site, branch: f.b.value.trim(), title: f.title.value.trim(), items,
       needed_date: earliest, files, requester_id: S.me.id, requester_name: S.me.full_name,
     });
     if (error) throw new Error(error.message);
@@ -1028,6 +1048,7 @@ function openDetail(id, keepVendors) {
   const info = mode ? editFormHtml(r, mode)
   : `
     <div class="grid2">
+      <div><span>สาขา</span><b>${esc(r.site || '-')}</b></div>
       <div><span>แผนก</span>${esc(r.branch || '-')}</div>
       <div><span>ผู้สั่ง</span>${esc(r.requester_name)}</div>
       <div><span>วันเวลาที่แนบ</span>${fmtDT(r.created_at)}</div>
@@ -1087,6 +1108,7 @@ function openDetail(id, keepVendors) {
     if (staffCan && r.status === 'new') actions.push(`<button class="btn primary" data-act="ack" data-id="${r.id}">ยืนยันรับทราบ</button>`);
     if (staffCan && canDone() && r.status === 'pending') actions.push(`<button class="btn ok" data-act="done" data-id="${r.id}" ${anyFlag(r) ? 'disabled title="ต้องยืนยันการแก้ไขทุกฝั่งก่อน"' : ''}>เปลี่ยนเป็นเรียบร้อย</button>`);
     if (isAdmin() && r.status === 'done') actions.push(`<button class="btn" data-act="reopen" data-id="${r.id}">ย้อนกลับเป็นรอดำเนินการ</button>`);
+    if (r.status === 'done' && (isStaff() || isAcct() || r.requester_id === S.me.id)) actions.push(`<button class="btn dark" data-act="printReq" data-id="${r.id}">🖨️ พิมพ์ใบงาน</button>`);
     if (isAdmin() && !mode) left.push(`<button class="btn sm" data-act="edit" data-v="admin">แก้ไขข้อมูลคำขอ</button>`);
     if (canOwner && !mode) left.push(`<button class="btn sm ${r.status === 'new' ? '' : 'primary'}" data-act="edit" data-v="owner">แก้ไขใบงาน</button>`);
     if (ownerActive && r.status === 'pending' && !r.unlock && !mode) left.push(`<button class="btn sm" data-act="unlockForm" data-id="${r.id}">🔓 ขอปลดล็อกเพื่อแก้ไข</button>`);
@@ -1095,6 +1117,7 @@ function openDetail(id, keepVendors) {
     if ((r.requester_id === S.me.id || isStaff()) && returnable(r).length && !mode) left.push(`<button class="btn sm" data-act="returnForm" data-id="${r.id}">คืนของ</button>`);
     if (isStaff()) left.push(`<button class="btn sm danger" data-act="trash" data-id="${r.id}">ย้ายลงถัง</button>`);
   } else {
+    if (r.status === 'done' && (isStaff() || isAcct())) actions.push(`<button class="btn dark" data-act="printReq" data-id="${r.id}">🖨️ พิมพ์ใบงาน</button>`);
     if (isStaff()) actions.push(`<button class="btn" data-act="restore" data-id="${r.id}">กู้คืน</button>`);
     if (isAdmin()) actions.push(`<button class="btn danger" data-act="purge" data-id="${r.id}">ลบถาวร</button>`);
   }
@@ -1109,7 +1132,7 @@ function openDetail(id, keepVendors) {
     <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
     ${returnsHtml(r)}
     ${histHtml}
-    ${!isStaff() && !mode ? `<p class="note" style="margin-top:16px">${ownerActive ? (r.status === 'new' ? 'จัดซื้อยังไม่รับทราบ แก้ไขหรือยกเลิกได้อิสระ' : canOwner ? 'ได้รับการปลดล็อกแล้ว กด "แก้ไขใบงาน" เพื่อแก้ไข' : 'ใบงานถูกล็อกหลังจัดซื้อรับทราบ ถ้าต้องการแก้ไขให้กด "ขอปลดล็อกเพื่อแก้ไข" ส่วนการแนบไฟล์เพิ่มทำได้ตลอด') : 'ใบงานนี้แก้ไขไม่ได้แล้ว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการเปลี่ยนแปลง'}</p>` : ''}
+    ${isAcct() ? `<p class="note" style="margin-top:16px">สิทธิ์บัญชี / การเงิน ดู เปิดไฟล์ และพิมพ์ได้อย่างเดียว</p>` : ''}${!isStaff() && !isAcct() && !mode ? `<p class="note" style="margin-top:16px">${ownerActive ? (r.status === 'new' ? 'จัดซื้อยังไม่รับทราบ แก้ไขหรือยกเลิกได้อิสระ' : canOwner ? 'ได้รับการปลดล็อกแล้ว กด "แก้ไขใบงาน" เพื่อแก้ไข' : 'ใบงานถูกล็อกหลังจัดซื้อรับทราบ ถ้าต้องการแก้ไขให้กด "ขอปลดล็อกเพื่อแก้ไข" ส่วนการแนบไฟล์เพิ่มทำได้ตลอด') : 'ใบงานนี้แก้ไขไม่ได้แล้ว ติดต่อเจ้าหน้าที่จัดซื้อหากต้องการเปลี่ยนแปลง'}</p>` : ''}
     <div class="foot"><div class="left">${left.join('')}</div>${actions.join('')}</div>
   </div>`);
   if ($('#e_items')) initLines($('#e_items'));
@@ -1253,6 +1276,7 @@ function editFormHtml(r, mode) {
   const okSides = afterAck ? (r.unlock?.sides || []) : CONFIG.ITEM_GROUPS.map(([k]) => k);
   return `
     ${afterAck ? `<div class="callout" style="margin:12px 0">ได้รับการปลดล็อกให้แก้ไขรายการ${okSides.map(x => SIDE_LABEL[x]).join(' และ ')} แก้ได้ 1 ครั้ง เมื่อบันทึกแล้วใบงานจะล็อกอีกครั้งและแจ้งเตือนเจ้าหน้าที่ บรรทัดที่ดำเนินการแล้วแก้ไม่ได้</div>` : ''}
+    <div class="f"><span class="lbl">สาขา</span><select class="inp" id="e_site">${CONFIG.SITES.map(x => `<option ${r.site === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}${r.site && !CONFIG.SITES.includes(r.site) ? `<option selected>${esc(r.site)}</option>` : ''}</select></div>
     <div class="grid2">
       <label class="f"><span>ชื่องาน</span><input class="inp" id="e_title" value="${esc(r.title)}"></label>
       <label class="f"><span>แผนก</span><input class="inp" id="e_b" value="${esc(r.branch)}"></label>
@@ -1279,7 +1303,7 @@ function returnsHtml(r) {
         ${t.status === 'pending' && t.requester_id === S.me.id ? `<button class="btn sm danger" data-act="retCancel" data-rid="${t.id}">ยกเลิกการคืน</button>` : ''}
         ${t.status === 'pending' && isStaff() ? `<button class="btn sm ok" data-act="retConfirm" data-rid="${t.id}">ยืนยันรับคืน</button>` : ''}
         ${t.status === 'received' && isStaff() ? `<button class="btn sm" data-act="refundForm" data-rid="${t.id}">${t.refund_amount != null || (t.refund_slips || []).length ? 'แก้ไขสลิปเงินคืน' : 'แนบสลิปเงินคืน'}</button>` : ''}
-        ${t.status === 'received' && isStaff() ? `<button class="btn sm dark" data-act="retPrint" data-rid="${t.id}">พิมพ์ใบคืนของ</button>` : ''}
+        ${t.status === 'received' && (isStaff() || isAcct()) ? `<button class="btn sm dark" data-act="retPrint" data-rid="${t.id}">พิมพ์ใบคืนของ</button>` : ''}
       </div>
     </div>`).join('')}</div>`;
 }
@@ -1336,6 +1360,75 @@ function openReturnForm(id) {
     }
   };
 }
+function printHtml(html) {
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(fr);
+  const d = fr.contentDocument; d.open(); d.write(html); d.close();
+  let printed = false;
+  const go = () => {
+    if (printed) return; printed = true;
+    try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch { toast('พิมพ์ไม่สำเร็จ ลองเปิดจากเบราว์เซอร์ Chrome', 'err'); }
+    setTimeout(() => fr.remove(), 60000);
+  };
+  fr.onload = () => (d.fonts ? d.fonts.ready.then(go) : go());
+  setTimeout(go, 3000);
+}
+const PRINT_CSS = `@page{size:A4;margin:14mm}
+  body{font:13px/1.55 "IBM Plex Sans Thai","Sarabun",sans-serif;color:#000;margin:0}
+  .hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:12px}
+  h1{font-size:22px;margin:0} .co{font-size:12px;color:#333}
+  .no{text-align:right;font-size:12px} .no b{font-size:18px;display:block}
+  .info{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:12px}
+  .info span{color:#555;display:inline-block;min-width:110px}
+  h3{font-size:14px;margin:14px 0 6px}
+  table{width:100%;border-collapse:collapse;margin-bottom:8px}
+  th,td{border:1px solid #000;padding:5px 7px;text-align:left;vertical-align:top}
+  th{background:#eee;font-weight:600} .n{text-align:center;width:36px} .q{text-align:right;white-space:nowrap}
+  tr.sum td{font-weight:700;background:#f6f6f6}
+  .note{border:1px solid #000;padding:6px 8px;min-height:30px}
+  .sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;text-align:center;margin-top:34px;page-break-inside:avoid}
+  .sign .l{border-bottom:1px dotted #000;height:34px;margin-bottom:6px}
+  .ft{margin-top:22px;font-size:10.5px;color:#666;text-align:right}`;
+function printRequest(r) {
+  const b = budget(r), rets = returnsOf(r.id);
+  const lines = []; CONFIG.ITEM_GROUPS.forEach(([k, l]) => itemsOf(r)[k].forEach(x => lines.push({ ...x, gl: l })));
+  const files = r.files || [], rcpt = lines.reduce((t, x) => t + (x.receipts || []).length, 0);
+  const html = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>ใบงาน ${pr(r.id)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>${PRINT_CSS}</style></head><body>
+  <div class="hd"><div><h1>ใบสรุปงาน${r.status === 'done' ? ' (เรียบร้อย)' : ''}</h1><div class="co">${esc(CONFIG.COMPANY_NAME || '')}${CONFIG.COMPANY_NAME ? ' / ' : ''}ระบบรับใบงาน_จัดซื้อ</div></div>
+    <div class="no">เลขที่ใบงาน<b>${pr(r.id)}</b>${esc(r.site || '')}</div></div>
+  <div class="info">
+    <div><span>สาขา</span><b>${esc(r.site || '-')}</b></div>
+    <div><span>ชื่องาน</span><b>${esc(r.title)}</b></div>
+    <div><span>แผนก</span>${esc(r.branch || '-')}</div>
+    <div><span>ผู้สั่ง</span>${esc(r.requester_name || '-')}</div>
+    <div><span>วันเวลาที่แนบ</span>${fmtDT(r.created_at)}</div>
+    <div><span>รับทราบโดย</span>${esc(r.acknowledged_by || '-')} ${r.acknowledged_at ? fmtDT(r.acknowledged_at) : ''}</div>
+    <div><span>เรียบร้อยโดย</span>${esc(r.completed_by || '-')} ${r.completed_at ? fmtDT(r.completed_at) : ''}</div>
+    <div><span>ไฟล์แนบ / ใบเสร็จ</span>${files.length} ไฟล์ / ${rcpt} ไฟล์</div>
+  </div>
+  <h3>รายการ</h3>
+  <table><thead><tr><th class="n">ลำดับ</th><th>รายการ</th><th>กลุ่ม</th><th>ต้องการใช้</th><th>ผู้ดำเนินการ</th><th class="q">ราคา (บาท)</th></tr></thead><tbody>
+    ${lines.map((x, i) => `<tr><td class="n">${i + 1}</td><td>${esc(x.text)}</td><td>${esc(x.gl)}</td><td>${fmtD(x.date)}</td><td>${x.bought ? esc(x.bought_by || '✓') : 'ยังไม่ดำเนินการ'}</td><td class="q">${x.price != null ? fmtB(x.price) : '-'}</td></tr>`).join('')}
+    ${Object.entries(b.per).map(([g, v]) => `<tr><td colspan="5" class="q">รวม${esc(groupLabel(g))}</td><td class="q">${fmtB(v)}</td></tr>`).join('')}
+    <tr class="sum"><td colspan="5" class="q">ใช้งบรวมทั้งหมด</td><td class="q">${fmtB(b.total)}</td></tr>
+    ${b.refund ? `<tr><td colspan="5" class="q">หัก เงินคืนจากการคืนของ</td><td class="q">-${fmtB(b.refund)}</td></tr><tr class="sum"><td colspan="5" class="q">ใช้งบสุทธิ</td><td class="q">${fmtB(b.net)}</td></tr>` : ''}
+  </tbody></table>
+  ${rets.length ? `<h3>การคืนของ</h3><table><thead><tr><th>เลขที่</th><th>สิ่งของที่คืน</th><th>ผู้คืน / วันที่</th><th>สถานะ</th><th class="q">เงินคืน (บาท)</th></tr></thead><tbody>
+    ${rets.map(t => `<tr><td>${rtNo(t.id)}</td><td>${(t.items || []).map(x => esc(`${x.text} ${x.qty} ${x.unit || ''}`)).join('<br>')}</td><td>${esc(t.returner_name || '')}<br>${fmtDT(t.created_at)}</td><td>${t.status === 'received' ? 'รับคืนแล้ว' : 'รอรับคืน'}</td><td class="q">${t.refund_amount != null ? fmtB(t.refund_amount) : '-'}</td></tr>`).join('')}
+  </tbody></table>` : ''}
+  ${(r.vendors || []).filter(v => v.name).length ? `<h3>ร้าน / บุคคลที่ติดต่อ</h3><table><tbody>${r.vendors.filter(v => v.name).map(v => `<tr><td>${esc(v.name)}</td><td>${esc(v.contact || '')}</td><td>${esc(v.item || '')}</td></tr>`).join('')}</tbody></table>` : ''}
+  ${r.staff_note ? `<h3>หมายเหตุเจ้าหน้าที่</h3><div class="note">${esc(r.staff_note)}</div>` : ''}
+  <div class="sign">
+    <div><div class="l"></div>ผู้จัดทำ (จัดซื้อ)<br>(${esc(r.completed_by || '')})<br>วันที่ ........./........./.........</div>
+    <div><div class="l"></div>ผู้ตรวจสอบ (บัญชี / การเงิน)<br>(.......................................)<br>วันที่ ........./........./.........</div>
+  </div>
+  <div class="ft">พิมพ์เมื่อ ${fmtDT(new Date().toISOString())} โดย ${esc(S.me.full_name || '')}</div>
+  </body></html>`;
+  printHtml(html);
+}
 function printReturn(t) {
   const r = S.rows.find(x => x.id === t.request_id) || {};
   const dLong = iso => iso ? new Date(iso).toLocaleDateString('th-TH', { timeZone: TZ, day: 'numeric', month: 'long', year: 'numeric' }) : '-';
@@ -1362,6 +1455,7 @@ function printReturn(t) {
     <div class="no">เลขที่ใบคืนของ<b>${rtNo(t.id)}</b></div></div>
   <div class="info">
     <div><span>เลขที่ใบ PR</span><b>${pr(t.request_id)}</b></div>
+    <div><span>สาขา</span><b>${esc(r.site || '-')}</b></div>
     <div><span>ชื่องาน</span><b>${esc(r.title || '-')}</b></div>
     <div><span>แผนก</span>${esc(r.branch || '-')}</div>
     <div><span>ชื่อผู้คืน</span><b>${esc(t.returner_name || '-')}</b></div>
@@ -1378,18 +1472,7 @@ function printReturn(t) {
   </div>
   <div class="ft">พิมพ์เมื่อ ${fmtDT(new Date().toISOString())}</div>
   </body></html>`;
-  const fr = document.createElement('iframe');
-  fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
-  document.body.appendChild(fr);
-  const d = fr.contentDocument; d.open(); d.write(html); d.close();
-  let printed = false;
-  const go = () => {
-    if (printed) return; printed = true;
-    try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch { toast('พิมพ์ไม่สำเร็จ ลองเปิดจากเบราว์เซอร์ Chrome', 'err'); }
-    setTimeout(() => fr.remove(), 60000);
-  };
-  fr.onload = () => (d.fonts ? d.fonts.ready.then(go) : go());
-  setTimeout(go, 3000);
+  printHtml(html);
 }
 function readVendorInputs() {
   document.querySelectorAll('#vrows .vrow').forEach(row => {
@@ -1432,7 +1515,7 @@ function exportExcel() {
   const bk = iso => iso ? new Date(iso).toLocaleString('th-TH', { timeZone: TZ }) : '';
   const rows = list.map(r => {
     const o = {
-      'เลขที่': pr(r.id), 'ชื่องาน': r.title, 'แผนก': r.branch || '',
+      'เลขที่': pr(r.id), 'สาขา': r.site || '', 'ชื่องาน': r.title, 'แผนก': r.branch || '',
       ...Object.fromEntries(CONFIG.ITEM_GROUPS.map(([k, l]) => ['รายการ' + l, itemsOf(r)[k].map((x, i) => `${i + 1}. ${itemLabel(x)}`).join('\n')])),
       'ผู้สั่ง': r.requester_name, 'วันเวลาที่แนบ': bk(r.created_at), 'วันที่ต้องการใช้ (เร็วสุด)': fmtD(r.needed_date),
       'สถานะ': STATUS[r.status],
@@ -1505,6 +1588,7 @@ const A = {
     S.returns = S.returns.filter(x => x.id !== t.id); toast('ยกเลิกการคืนแล้ว');
     renderContent(); renderHeaderCounts(); openDetail(t.request_id, true);
   },
+  printReq: (el, id) => { const r = S.rows.find(x => x.id === id); if (r) printRequest(r); },
   retPrint: el => { const t = S.returns.find(x => x.id === +el.dataset.rid); if (t) printReturn(t); },
   copySummary: async () => { await copyText(summaryText()); toast('คัดลอกสรุปแล้ว วางในไลน์กลุ่มได้เลย'); },
   sound: () => {
@@ -1568,7 +1652,7 @@ const A = {
     let up = [];
     try {
       up = await uploadFiles(picked);
-      const fields = { branch: $('#e_b').value.trim(), title: t, items, needed_date: earliest || r.needed_date, edit_reason: reason || null };
+      const fields = { site: $('#e_site').value, branch: $('#e_b').value.trim(), title: t, items, needed_date: earliest || r.needed_date, edit_reason: reason || null };
       if (up.length) fields.files = [...(r.files || []), ...up];
       if (await patch(id, fields, r.status === 'new' || !owner ? 'บันทึกการแก้ไขแล้ว' : 'บันทึกแล้ว แจ้งเตือนเจ้าหน้าที่แล้ว')) { S.editMode = null; openDetail(id); return; }
     } catch (x) { toast(x.message, 'err'); }
