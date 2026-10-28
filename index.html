@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fzozxftfxtvbmuryiihf.supabase.co" crossorigin>
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
 <style>
 :root{
   --paper:#EEF1F5; --surface:#FFFFFF; --ink:#1F2A44; --ink-2:#3A4766; --muted:#66718A; --line:#D9DFE8;
@@ -256,6 +256,10 @@ a.btn{text-decoration:none;display:inline-block}
 .seg input:checked+span{border-color:var(--red);background:var(--red-bg);color:var(--red)}
 .seg input:focus-visible+span{outline:2px solid var(--blue);outline-offset:2px}
 .site{font-size:12px;font-weight:600;background:var(--ink);color:var(--paper);border-radius:5px;padding:1px 7px}
+.boot{min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--muted)}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:sp 0.8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -270,7 +274,7 @@ a.btn{text-decoration:none;display:inline-block}
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div class="boot"><div class="spin"></div>กำลังเปิดระบบรับใบงาน_จัดซื้อ...</div></div>
 <div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
 <div id="toasts" aria-live="polite"></div>
 
@@ -281,7 +285,7 @@ const CONFIG = {
   SUPABASE_ANON_KEY: 'sb_publishable_WdCOu73wY1xQuM70rs6NbA_vDNO5_0-',   // Publishable key
   EMAIL_DOMAIN: 'purchase.local',      // ใช้แปลง "ชื่อผู้ใช้" เป็นอีเมลภายใน ไม่มีการส่งเมลจริง
   BUCKET: 'purchase-files',
-  BRANCHES: ['สำนักงานใหญ่','ปลวกแดง'],
+  BRANCHES: ['สำนักงานใหญ่', 'ปลวกแดง'],   // สาขาของพนักงาน (ตอนสมัครบัญชี)
   SITES: ['สำนักงานใหญ่', 'ปลวกแดง'],   // สาขาของใบงาน
   ITEM_GROUPS: [['purchase', 'จัดซื้อ'], ['moririn', 'โมริริน']],
   COMPANY_NAME: '',   // ชื่อบริษัทที่จะพิมพ์บนหัวใบคืนของ (เว้นว่างได้)
@@ -545,10 +549,11 @@ async function enter() {
   S.calMonth = new Date(); S.calMonth.setDate(1);
   S.view = isStaff() ? 'today' : 'list';
   if (isAcct()) S.filter = 'all';
-  if (isStaff()) { try { await sb.rpc('auto_trash_done'); } catch {} }
+  subscribe();
   await loadAll();
   renderShell();
-  subscribe();
+  // ย้ายงานเรียบร้อยครบ 30 วันลงถังแบบเบื้องหลัง ไม่ต้องรอ (ผลจะเข้ามาทางเรียลไทม์)
+  if (isStaff()) sb.rpc('auto_trash_done').then(() => {}, () => {});
 }
 
 async function loadContacts() {
@@ -556,16 +561,17 @@ async function loadContacts() {
   if (!c.error) S.contacts = c.data || [];
 }
 async function loadAll() {
-  const { data, error } = await sb.from('requests').select('*').order('needed_date').limit(5000);
-  if (error) { toast('โหลดข้อมูลไม่สำเร็จ: ' + error.message, 'err'); return; }
-  S.rows = data;
-  await loadContacts();
-  const rt = await sb.from('returns').select('*').order('created_at').limit(5000);
+  // ดึงทุกอย่างพร้อมกันในรอบเดียว แทนการรอทีละคำสั่ง
+  const [req, rt, , pf] = await Promise.all([
+    sb.from('requests').select('*').order('needed_date').limit(5000),
+    sb.from('returns').select('*').order('created_at').limit(5000),
+    loadContacts(),
+    isAdmin() ? sb.from('profiles').select('*').order('created_at') : Promise.resolve(null),
+  ]);
+  if (req.error) { toast('โหลดข้อมูลไม่สำเร็จ: ' + req.error.message, 'err'); return; }
+  S.rows = req.data;
   if (!rt.error) S.returns = rt.data;
-  if (isAdmin()) {
-    const p = await sb.from('profiles').select('*').order('created_at');
-    S.profiles = p.data || [];
-  }
+  if (pf) S.profiles = pf.data || [];
 }
 
 /* ======================= เรียลไทม์ ======================= */
@@ -976,7 +982,7 @@ function openCreate() {
   <div class="sh-h"><h2>สร้างคำขอใหม่</h2><button class="x" data-act="close" aria-label="ปิด">✕</button></div>
   <form class="sh-b" id="cf">
     <div class="clock" id="clock"></div>
-    <div class="f"><span class="lbl">สาขาของงานนี้</span><div class="seg">${CONFIG.SITES.map(x => `<label><input type="radio" name="site" value="${esc(x)}" required><span>${esc(x)}</span></label>`).join('')}</div></div>
+    <div class="f"><span class="lbl">สาขาของงานนี้</span><div class="seg">${CONFIG.SITES.map(x => `<label><input type="radio" name="site" value="${esc(x)}" required ${S.me.branch === x ? 'checked' : ''}><span>${esc(x)}</span></label>`).join('')}</div></div>
     <div class="grid2" style="margin-top:0">
       <label class="f"><span>ชื่องาน</span><input class="inp" name="title" required maxlength="200"></label>
       <label class="f"><span>แผนก</span><input class="inp" name="b" required maxlength="100"></label>
@@ -1508,7 +1514,19 @@ async function purge(ids) {
 }
 
 /* ======================= ส่งออก Excel ======================= */
-function exportExcel() {
+// ไลบรารี Excel ใหญ่ราว 900 KB จึงโหลดเฉพาะตอนกดส่งออกครั้งแรก
+let xlsxLoading;
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve();
+  return xlsxLoading ||= new Promise((ok, bad) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload = ok; sc.onerror = () => { xlsxLoading = null; bad(new Error('โหลดตัวส่งออก Excel ไม่สำเร็จ')); };
+    document.head.appendChild(sc);
+  });
+}
+async function exportExcel() {
+  try { await loadXLSX(); } catch (e) { return toast(e.message, 'err'); }
   const inTrash = S.view === 'trash';
   const list = inTrash ? filtered(trash()) : sortUrgent(filtered(live()));
   if (!list.length) return toast('ไม่มีรายการให้ส่งออก', 'err');
@@ -1683,7 +1701,8 @@ document.addEventListener('click', e => {
   fn(el, el.dataset.id ? Number(el.dataset.id) : null);
 });
 
-init();
+// เริ่มทำงานเมื่อไลบรารีที่โหลดแบบ defer พร้อมแล้ว
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 </script>
 </body>
 </html>
