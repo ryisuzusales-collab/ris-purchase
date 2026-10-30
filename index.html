@@ -263,6 +263,15 @@ a.btn{text-decoration:none;display:inline-block}
 .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:sp 0.8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+.fsize{margin-left:auto;color:var(--muted);white-space:nowrap}
+.fsize.big{color:var(--amber);font-weight:600}
+.fsum{font-size:13px;color:var(--muted);margin:-2px 0 8px}
+.meter{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:14px 0}
+.meter .mh{display:flex;flex-wrap:wrap;gap:4px 12px;justify-content:space-between;font-size:14px}
+.meter .mh span{color:var(--muted);font-size:13px}
+.mbar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:8px 0 4px}
+.mbar i{display:block;height:100%;background:var(--green)}
+.mbar i.mid{background:var(--amber)} .mbar i.hi{background:var(--red)}
 .linebar{background:var(--amber-bg);color:var(--amber);font-size:13px;padding:8px 16px;text-align:center}
 
 @media (max-width:640px){
@@ -466,6 +475,18 @@ function bindFileAdder() {
   };
 }
 const fileRow = f => `<div class="file"><div class="fn"><b>${esc(f.name)}</b><small>${fmtSize(f.size || 0)}${f.uploaded_by ? ', แนบโดย ' + esc(f.uploaded_by) : ''}${f.uploaded_at ? ' เมื่อ ' + fmtDT(f.uploaded_at) : ''}</small></div><button type="button" class="btn sm" data-act="file" data-path="${esc(f.path)}">เปิด</button></div>`;
+// ขนาดไฟล์ทั้งหมดของใบงาน: ไฟล์แนบ + ใบเสร็จรายบรรทัด + รูปของที่คืน + สลิปเงินคืน
+function fileGroups(r) {
+  const att = r.files || [];
+  const rc = Object.values(itemsOf(r)).flat().flatMap(x => x.receipts || []);
+  const rets = returnsOf(r.id);
+  const ret = rets.flatMap(t => t.files || []), slip = rets.flatMap(t => t.refund_slips || []);
+  return { att, rc, ret, slip, all: [...att, ...rc, ...ret, ...slip] };
+}
+const sumBytes = a => a.reduce((t, f) => t + (+f.size || 0), 0);
+const reqBytes = r => sumBytes(fileGroups(r).all);
+const fmtMB = b => { const m = b / 1048576; return (m === 0 ? '0' : m < 0.1 ? '<0.1' : m < 10 ? m.toFixed(1) : Math.round(m).toLocaleString('th-TH')) + ' MB'; };
+const STORAGE_MB = 1024;   // พื้นที่ไฟล์ของแพ็กเกจฟรี
 const rtNo = id => 'RT-' + String(id).padStart(5, '0');
 const returnsOf = id => S.returns.filter(t => t.request_id === id).sort((a, b) => a.created_at.localeCompare(b.created_at));
 const hasPendRet = r => S.returns.some(t => t.request_id === r.id && t.status === 'pending');
@@ -784,7 +805,7 @@ function ticket(r) {
         ${CONFIG.ITEM_GROUPS.map(([k, l]) => { const n = itemsOf(r)[k].length; return n ? `<span>${l} <b>${n}</b> รายการ</span>` : ''; }).join('')}
         ${(() => { const [b, n] = itemProgress(r); return b ? `<span>ดำเนินการแล้ว <b>${b}/${n}</b></span>` : ''; })()}
         ${(() => { const t = budget(r).total; return t ? `<span>งบ <b>${fmtB(t)}</b></span>` : ''; })()}
-        <span>ไฟล์ <b>${(r.files || []).length}</b></span></div>
+        ${(() => { const g = fileGroups(r), b = sumBytes(g.all); return `<span class="fsize ${b > 10485760 ? 'big' : ''}" title="ไฟล์แนบ ใบเสร็จ รูปของที่คืน และสลิป รวมกัน">📎 ${g.all.length} ไฟล์, ${fmtMB(b)}</span>`; })()}</div>
       ${vend.length ? `<div class="vend">ร้าน/บุคคล: ${vend.map(v => (v.done ? '✓ ' : '') + esc(v.name)).join(', ')}</div>` : ''}
     </div></div>`;
 }
@@ -933,16 +954,24 @@ function renderCal() {
 }
 
 /* ======================= ถังขยะ ======================= */
+function storageMeter() {
+  const used = S.rows.reduce((t, r) => t + reqBytes(r), 0), inTrash = trash().reduce((t, r) => t + reqBytes(r), 0);
+  const pct = Math.min(100, used / (STORAGE_MB * 1048576) * 100);
+  return `<div class="meter"><div class="mh"><b>พื้นที่ไฟล์ที่ใช้ประมาณ ${fmtMB(used)} จาก ${STORAGE_MB.toLocaleString('th-TH')} MB (${pct.toFixed(0)}%)</b>
+    <span>ในถังขยะ ${fmtMB(inTrash)} ลบถาวรแล้วจะได้พื้นที่คืน</span></div>
+    <div class="mbar"><i style="width:${pct.toFixed(1)}%" class="${pct > 85 ? 'hi' : pct > 60 ? 'mid' : ''}"></i></div>
+    <span class="note">คำนวณจากไฟล์ที่แนบผ่านแอป ตัวเลขจริงดูได้ที่หน้า Usage ของ Supabase</span></div>`;
+}
 function renderTrash() {
   const list = filtered(trash()).sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
-  if (!list.length) return `<div class="empty">ถังขยะว่าง งานที่เรียบร้อยครบ 30 วันจะถูกย้ายมาที่นี่อัตโนมัติ</div>`;
-  return `<p class="note">รายการในถังจะอยู่จนกว่าแอดมินจะลบถาวร กดกู้คืนเพื่อนำกลับไปที่รายการ</p>
+  if (!list.length) return storageMeter() + `<div class="empty">ถังขยะว่าง งานที่จบงานครบ 30 วันจะถูกย้ายมาที่นี่อัตโนมัติ</div>`;
+  return storageMeter() + `<p class="note">รายการในถังจะอยู่จนกว่าแอดมินจะลบถาวร กดกู้คืนเพื่อนำกลับไปที่รายการ</p>
   ${isAdmin() ? `<div style="margin-bottom:10px"><button class="btn sm danger" data-act="purgeAll">ลบถาวรทั้งหมดในถัง (${list.length})</button></div>` : ''}
-  <div class="scroll"><table class="tbl"><thead><tr><th>เลขที่</th><th>เรื่อง</th><th>ผู้สั่ง</th><th>สถานะเดิม</th><th>ลบเมื่อ</th><th>ลบโดย</th><th></th></tr></thead><tbody>
+  <div class="scroll"><table class="tbl"><thead><tr><th>เลขที่</th><th>เรื่อง</th><th>ผู้สั่ง</th><th>สถานะเดิม</th><th>ลบเมื่อ</th><th>ลบโดย</th><th>ไฟล์</th><th></th></tr></thead><tbody>
   ${list.map(r => `<tr>
     <td><a href="#" data-act="open" data-id="${r.id}">${pr(r.id)}</a></td><td>${esc(r.title)}</td><td>${esc(r.requester_name)}</td>
     <td><span class="badge s-${r.status}" style="margin:0">${STATUS[r.status]}</span></td>
-    <td>${fmtDT(r.deleted_at)}</td><td>${esc(r.deleted_by)}</td>
+    <td>${fmtDT(r.deleted_at)}</td><td>${esc(r.deleted_by)}</td><td style="white-space:nowrap">${fmtMB(reqBytes(r))}</td>
     <td style="white-space:nowrap"><button class="btn sm" data-act="restore" data-id="${r.id}">กู้คืน</button>
       ${isAdmin() ? `<button class="btn sm danger" data-act="purge" data-id="${r.id}">ลบถาวร</button>` : ''}</td></tr>`).join('')}
   </tbody></table></div>`;
@@ -1146,7 +1175,8 @@ function openDetail(id, keepVendors) {
     ${unlockHtml(r)}
     ${alertHtml}
     ${info}
-    <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${files}</div>
+    <div class="sec"><h4>ไฟล์แนบ (${(r.files || []).length})</h4>${(() => { const g = fileGroups(r);
+      return `<div class="fsum">ใบงานนี้ใช้พื้นที่ไฟล์รวม <b>${fmtMB(sumBytes(g.all))}</b> (ไฟล์แนบ ${fmtMB(sumBytes(g.att))}, ใบเสร็จ ${fmtMB(sumBytes(g.rc))}, คืนของ ${fmtMB(sumBytes(g.ret) + sumBytes(g.slip))})</div>`; })()}${files}</div>
     <div class="sec"><h4>ร้านหรือบุคคลที่ต้องไปซื้อ / ติดต่อ</h4>${vendorsHtml}</div>
     ${returnsHtml(r)}
     ${histHtml}
